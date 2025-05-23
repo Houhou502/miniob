@@ -13,6 +13,14 @@ See the Mulan PSL v2 for more details. */
 #include "common/type/char_type.h"
 #include "common/value.h"
 
+bool check_date(int y, int m, int d)
+{
+  int mon[15] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
+  bool leap = (y%400==0 || (y%100 && y%4==0));
+  return y>0 && y<=9999 && m>0 && m<=12 && d>0 && (d <= ((m==2 && leap)?1:0) + mon[m]);
+}
+
+
 int CharType::compare(const Value &left, const Value &right) const
 {
   ASSERT(left.attr_type() == AttrType::CHARS && right.attr_type() == AttrType::CHARS, "invalid type");
@@ -29,6 +37,22 @@ RC CharType::set_value_from_str(Value &val, const string &data) const
 RC CharType::cast_to(const Value &val, AttrType type, Value &result) const
 {
   switch (type) {
+    case AttrType::DATES:
+    {
+      result.attr_type_ = AttrType::DATES;
+      int y,m,d;
+      if(sscanf(val.value_.pointer_value_, "%d-%d-%d" ,&y, &m, &d) != 3){
+        LOG_WARN("invalid date format: %s", val.value_.pointer_value_);
+        return RC::INVALID_ARGUMENT;
+      }
+
+      bool check_ret = check_date(y,m,d);
+      if(!check_ret){
+        LOG_WARN("invalid date format: %s", val.value_.pointer_value_);
+        return RC::INVALID_ARGUMENT;
+      }
+      result.set_date(y,m,d);
+    }
     default: return RC::UNIMPLEMENTED;
   }
   return RC::SUCCESS;
@@ -38,6 +62,9 @@ int CharType::cast_cost(AttrType type)
 {
   if (type == AttrType::CHARS) {
     return 0;
+  }
+  if (type == AttrType::DATES) {
+    return 1;
   }
   return INT32_MAX;
 }
