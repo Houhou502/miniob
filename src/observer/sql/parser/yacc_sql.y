@@ -87,7 +87,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         TRX_ROLLBACK
         INT_T
         STRING_T
-        DATE_T //题目1
+        DATE_T 
         FLOAT_T
         VECTOR_T
         HELP

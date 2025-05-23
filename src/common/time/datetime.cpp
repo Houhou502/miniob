@@ -441,4 +441,20 @@ bool DateTime::is_valid_xml_datetime(const string &str)
   return true;
 }
 
+bool check_date(int year, int month, int day) {
+  if (year < 0 || month < 1 || month > 12 || day < 1) {
+    return false;
+  }
+
+  static const int days_in_month[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  int max_day = days_in_month[month - 1];
+  
+  // 处理闰年2月
+  if (month == 2 && ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0))) {
+    max_day = 29;
+  }
+  
+  return day <= max_day;
+}
+
 }  // namespace common
