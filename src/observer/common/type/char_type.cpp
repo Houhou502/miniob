@@ -46,7 +46,10 @@ RC CharType::cast_to(const Value &val, AttrType type, Value &result) const
         return RC::INVALID_ARGUMENT;
       }
       result.set_date(y,m,d);
-    }
+
+    }break;
+    
+
     default: return RC::UNIMPLEMENTED;
   }
   return RC::SUCCESS;
