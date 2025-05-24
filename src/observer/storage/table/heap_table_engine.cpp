@@ -18,16 +18,23 @@ See the Mulan PSL v2 for more details. */
 
 HeapTableEngine::~HeapTableEngine()
 {
+  // 首先释放记录处理器
   if (record_handler_ != nullptr) {
     delete record_handler_;
     record_handler_ = nullptr;
   }
 
-  if (data_buffer_pool_ != nullptr) {
-    data_buffer_pool_->close_file();
-    data_buffer_pool_ = nullptr;
+  // 不再直接关闭文件，而是通过BufferPoolManager管理
+  // 检查文件是否已关闭
+  if (!file_closed_ && data_buffer_pool_ != nullptr) {
+    // 标记文件已关闭
+    file_closed_ = true;
+    // 通知BufferPoolManager该文件不再使用
+    db_->buffer_pool_manager().remove_file(table_data_file(db_->path().c_str(), table_meta_->name()).c_str());
   }
+  data_buffer_pool_ = nullptr;
 
+  // 释放索引
   for (vector<Index *>::iterator it = indexes_.begin(); it != indexes_.end(); ++it) {
     Index *index = *it;
     delete index;
@@ -285,6 +292,8 @@ RC HeapTableEngine::init()
 
   record_handler_ = new RecordFileHandler(table_meta_->storage_format());
 
+  file_closed_ = false;
+  
   rc = record_handler_->init(*data_buffer_pool_, db_->log_handler(), table_meta_);
   if (rc != RC::SUCCESS) {
     LOG_ERROR("Failed to init record handler. rc=%s", strrc(rc));

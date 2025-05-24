@@ -58,4 +58,5 @@ private:
   vector<Index *>    indexes_;
   Db                *db_;
   Table             *table_;
+  bool file_closed_ = false;
 };
