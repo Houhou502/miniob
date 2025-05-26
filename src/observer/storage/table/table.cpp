@@ -227,6 +227,11 @@ RC Table::insert_record(Record &record)
   return engine_->insert_record(record);
 }
 
+// RC Table::update_record(const Record &old_record, const Record &new_record)
+// {
+//   return engine_->update_record(old_record, new_record);
+// }
+
 RC Table::visit_record(const RID &rid, function<bool(Record &)> visitor)
 {
   return engine_->visit_record(rid, visitor);
@@ -295,6 +300,74 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
   record.set_data_owner(record_data, record_size);
   return RC::SUCCESS;
 }
+
+RC Table::get_record_values(const Record &record, Value *values)
+{
+    const TableMeta &table_meta = table_meta_;
+    int field_num = table_meta.field_num();
+
+    for (int i = 0; i < field_num; ++i) {
+        const FieldMeta *field_meta = table_meta.field(i);
+        if (field_meta == nullptr) {
+            LOG_WARN("field meta is null at index %d", i);
+            return RC::INTERNAL;
+        }
+
+        Field field(this, field_meta);
+        RC rc = field.get_value(record, values[i]);
+        if (rc != RC::SUCCESS) {
+            LOG_WARN("failed to get field value at index %d: %s", i, strrc(rc));
+            return rc;
+        }
+    }
+
+    return RC::SUCCESS;
+}
+
+// RC Table::make_record_update(const Record &old_record, const char *field_name, const Value &value, Record &new_record)
+// {
+//   // 复制旧记录数据
+//   char *new_data = new char[table_meta_.record_size()];
+//   memcpy(new_data, old_record.data(), table_meta_.record_size());
+//   new_record.set_data(new_data);
+//   new_record.set_rid(old_record.rid());
+
+//   // 查找字段
+//   const FieldMeta *field_meta = table_meta_.field(field_name);
+//   if (field_meta == nullptr) {
+//     delete[] new_data;
+//     return RC::SCHEMA_FIELD_NOT_EXIST;
+//   }
+
+//   // 检查类型是否匹配
+//   if (field_meta->type() != value.attr_type()) {
+//     delete[] new_data;
+//     return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+//   }
+
+//   // 更新字段值
+//   char *field_data = new_data + field_meta->offset();
+//   switch (field_meta->type()) {
+//     case AttrType::INTS: {
+//       *(int *)field_data = *(int *)value.data();
+//     } break;
+//     case AttrType::FLOATS: {
+//       *(float *)field_data = *(float *)value.data();
+//     } break;
+//     case AttrType::CHARS: {
+//       memcpy(field_data, value.data(), field_meta->len());
+//     } break;
+//     case AttrType::DATES: {
+//       *(int *)field_data = *(int *)value.data();
+//     } break;
+//     default: {
+//       delete[] new_data;
+//       return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+//     }
+//   }
+
+//   return RC::SUCCESS;
+// }
 
 RC Table::set_value_to_record(char *record_data, const Value &value, const FieldMeta *field)
 {

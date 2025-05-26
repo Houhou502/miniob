@@ -97,6 +97,44 @@ RC HeapTableEngine::delete_record(const Record &record)
   return rc;
 }
 
+
+// RC HeapTableEngine::update_record(const Record &old_record, const Record &new_record)
+// {
+//   RC rc = RC::SUCCESS;
+
+//   // 1. 删除旧记录
+//   rc = delete_record(old_record);
+//   if (rc != RC::SUCCESS) {
+//     LOG_ERROR("Failed to delete old record when updating. table name=%s, rc=%s", table_meta_->name(), strrc(rc));
+//     return rc;
+//   }
+
+//   // 2. 插入新记录
+//   Record new_record_copy = new_record;
+//   rc = insert_record(new_record_copy);
+//   if (rc != RC::SUCCESS) {
+//     LOG_ERROR("Failed to insert new record when updating. table name=%s, rc=%s", table_meta_->name(), strrc(rc));
+
+//     // 回滚删除操作
+//     RID old_rid_copy = old_record.rid(); // 创建 RID 的副本
+//     rc = record_handler_->insert_record(old_record.data(), table_meta_->record_size(), &old_rid_copy);
+//     if (rc != RC::SUCCESS) {
+//       LOG_ERROR("Failed to rollback record deletion when inserting new record failed. table name=%s, rc=%s",
+//                 table_meta_->name(), strrc(rc));
+//       return rc;
+//     }
+
+//     rc = insert_entry_of_indexes(old_record.data(), old_rid_copy);
+//     if (rc != RC::SUCCESS) {
+//       LOG_ERROR("Failed to rollback index deletion when inserting new record failed. table name=%s, rc=%d:%s",
+//                 table_meta_->name(), rc, strrc(rc));
+//       return rc;
+//     }
+//   }
+
+//   return rc;
+// }
+
 RC HeapTableEngine::get_record_scanner(RecordScanner *&scanner, Trx *trx, ReadWriteMode mode)
 {
   scanner = new HeapRecordScanner(table_, *data_buffer_pool_, trx, db_->log_handler(), mode, nullptr);

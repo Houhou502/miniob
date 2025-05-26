@@ -20,6 +20,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/delete_logical_operator.h"
 #include "sql/operator/explain_logical_operator.h"
 #include "sql/operator/insert_logical_operator.h"
+#include "sql/operator/update_logical_operator.h"
 #include "sql/operator/join_logical_operator.h"
 #include "sql/operator/logical_operator.h"
 #include "sql/operator/predicate_logical_operator.h"
@@ -32,6 +33,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/stmt/explain_stmt.h"
 #include "sql/stmt/filter_stmt.h"
 #include "sql/stmt/insert_stmt.h"
+#include "sql/stmt/update_stmt.h"
 #include "sql/stmt/select_stmt.h"
 #include "sql/stmt/stmt.h"
 
@@ -66,6 +68,12 @@ RC LogicalPlanGenerator::create(Stmt *stmt, unique_ptr<LogicalOperator> &logical
       DeleteStmt *delete_stmt = static_cast<DeleteStmt *>(stmt);
 
       rc = create_plan(delete_stmt, logical_operator);
+    } break;
+
+    case StmtType::UPDATE: {
+      UpdateStmt *update_stmt = static_cast<UpdateStmt *>(stmt);
+
+      rc = create_plan(update_stmt, logical_operator);
     } break;
 
     case StmtType::EXPLAIN: {
@@ -234,6 +242,62 @@ RC LogicalPlanGenerator::create_plan(InsertStmt *insert_stmt, unique_ptr<Logical
   logical_operator.reset(insert_operator);
   return RC::SUCCESS;
 }
+
+
+RC LogicalPlanGenerator::create_plan(UpdateStmt *update_stmt, unique_ptr<LogicalOperator> &logical_operator)
+{
+  Table *table = update_stmt->table();
+  const char *attribute_name = update_stmt->attribute_name();
+  const Value *value = update_stmt->value();
+  
+  // 1. 创建表扫描算子(READ_WRITE模式)
+  unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(table, ReadWriteMode::READ_WRITE));
+  
+  // 2. 如果有条件，创建过滤算子
+  unique_ptr<LogicalOperator> predicate_oper;
+  if (!update_stmt->conditions().empty()) {
+    // 创建过滤条件
+    FilterStmt *filter_stmt = nullptr;
+    RC rc = FilterStmt::create(
+        nullptr,  // db 可以为null，因为单表更新
+        table,    // 默认表
+        nullptr,  // tables map可以为null，单表操作
+        update_stmt->conditions().data(),
+        static_cast<int>(update_stmt->conditions().size()),
+        filter_stmt);
+    
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to create filter statement. rc=%s", strrc(rc));
+      return rc;
+    }
+    
+    // 使用unique_ptr管理FilterStmt生命周期
+    unique_ptr<FilterStmt> filter_stmt_guard(filter_stmt);
+    
+    rc = create_plan(filter_stmt, predicate_oper);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to create predicate operator. rc=%s", strrc(rc));
+      return rc;
+    }
+  }
+  
+  // 3. 创建更新算子
+  unique_ptr<LogicalOperator> update_oper(new UpdateLogicalOperator(table, attribute_name, value));
+  
+  // 4. 构建算子树
+  if (predicate_oper) {
+    // 如果有过滤条件: 表扫描 -> 过滤 -> 更新
+    predicate_oper->add_child(std::move(table_get_oper));
+    update_oper->add_child(std::move(predicate_oper));
+  } else {
+    // 如果没有过滤条件: 表扫描 -> 更新
+    update_oper->add_child(std::move(table_get_oper));
+  }
+  
+  logical_operator = std::move(update_oper);
+  return RC::SUCCESS;
+}
+
 
 RC LogicalPlanGenerator::create_plan(DeleteStmt *delete_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {

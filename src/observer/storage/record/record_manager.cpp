@@ -648,6 +648,7 @@ RC RecordFileHandler::delete_record(const RID *rid)
   return rc;
 }
 
+
 RC RecordFileHandler::get_record(const RID &rid, Record &record)
 {
   unique_ptr<RecordPageHandler> page_handler(RecordPageHandler::create(storage_format_));

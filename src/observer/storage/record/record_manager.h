@@ -326,6 +326,8 @@ public:
 
   virtual RC delete_record(const RID *rid) override;
 
+
+
   /**
    * @brief 获取指定位置的记录数据
    *
@@ -387,6 +389,8 @@ public:
    * @param rid         返回该记录的标识符
    */
   RC insert_record(const char *data, int record_size, RID *rid);
+
+  //RC update_record(const RID &rid, const Record &new_record);
 
   /**
    * @brief 数据库恢复时，在指定文件指定位置插入数据

@@ -28,6 +28,10 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/index_scan_physical_operator.h"
 #include "sql/operator/insert_logical_operator.h"
 #include "sql/operator/insert_physical_operator.h"
+
+#include "sql/operator/update_logical_operator.h"
+#include "sql/operator/update_physical_operator.h"
+
 #include "sql/operator/join_logical_operator.h"
 #include "sql/operator/nested_loop_join_physical_operator.h"
 #include "sql/operator/predicate_logical_operator.h"
@@ -69,6 +73,10 @@ RC PhysicalPlanGenerator::create(LogicalOperator &logical_operator, unique_ptr<P
 
     case LogicalOperatorType::INSERT: {
       return create_plan(static_cast<InsertLogicalOperator &>(logical_operator), oper, session);
+    } break;
+
+    case LogicalOperatorType::UPDATE: {
+      return create_plan(static_cast<UpdateLogicalOperator &>(logical_operator), oper, session);
     } break;
 
     case LogicalOperatorType::DELETE: {
@@ -275,6 +283,37 @@ RC PhysicalPlanGenerator::create_plan(DeleteLogicalOperator &delete_oper, unique
     oper->add_child(std::move(child_physical_oper));
   }
   return rc;
+}
+
+RC PhysicalPlanGenerator::create_plan(UpdateLogicalOperator &update_oper, unique_ptr<PhysicalOperator> &oper, Session *session)
+{
+  // 1. 处理子算子（通常是表扫描或带条件的过滤算子）
+  vector<unique_ptr<LogicalOperator>> &child_opers = update_oper.children();
+  unique_ptr<PhysicalOperator> child_physical_oper;
+
+  if (!child_opers.empty()) {
+    LogicalOperator *child_oper = child_opers.front().get();
+    RC rc = create(*child_oper, child_physical_oper, session);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to create child physical operator. rc=%s", strrc(rc));
+      return rc;
+    }
+  }
+
+  // 2. 创建更新物理算子
+  Table *table = update_oper.table();
+  const char *attribute_name = update_oper.attribute_name();
+  const Value *value = update_oper.value();
+  UpdatePhysicalOperator *update_phy_oper = 
+  new UpdatePhysicalOperator(table, attribute_name, value);
+
+  // 3. 构建算子关系
+  oper.reset(update_phy_oper);
+  if (child_physical_oper) {
+    oper->add_child(std::move(child_physical_oper));
+  }
+
+  return RC::SUCCESS;
 }
 
 RC PhysicalPlanGenerator::create_plan(ExplainLogicalOperator &explain_oper, unique_ptr<PhysicalOperator> &oper, Session* session)

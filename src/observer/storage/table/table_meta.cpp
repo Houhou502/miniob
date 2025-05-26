@@ -360,3 +360,16 @@ void TableMeta::desc(ostream &os) const
   }
   os << ')' << endl;
 }
+
+int TableMeta::find_field_index_by_name(const char *name) const
+{
+    int field_num_ = field_num();
+    for (int i = 0; i < field_num_; ++i) {
+        const FieldMeta *field_meta = field(i);
+        if (field_meta != nullptr && strcmp(field_meta->name(), name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+

@@ -41,6 +41,7 @@ public:
 
   void set_int(Record &record, int value);
   int  get_int(const Record &record);
+  RC get_value(const Record &record, Value &value) const;
 
   const char *get_data(const Record &record);
 

@@ -33,3 +33,21 @@ int Field::get_int(const Record &record)
 }
 
 const char *Field::get_data(const Record &record) { return record.data() + field_->offset(); }
+
+#include "storage/field/field.h"
+#include "common/value.h"
+#include "storage/record/record.h"
+
+RC Field::get_value(const Record &record, Value &value) const
+{
+    if (field_ == nullptr) {
+        LOG_WARN("Field meta is null");
+        return RC::INTERNAL;
+    }
+
+    value.reset();
+    value.set_type(field_->type());
+    value.set_data(record.data() + field_->offset(), field_->len());
+
+    return RC::SUCCESS;
+}

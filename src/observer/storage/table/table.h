@@ -78,6 +78,8 @@ public:
    */
   RC make_record(int value_num, const Value *values, Record &record);
 
+  //RC make_record_update(const Record &old_record, const char *field_name, const Value &value, Record &new_record);
+
   /**
    * @brief 在当前的表中插入一条记录
    * @details 在表文件和索引中插入关联数据。这里只管在表中插入数据，不关心事务相关操作。
@@ -85,6 +87,7 @@ public:
    */
   RC insert_record(Record &record);
   RC delete_record(const Record &record);
+  //RC update_record(const Record &old_record, const Record &new_record);
 
   RC insert_record_with_trx(Record &record, Trx *trx);
   RC delete_record_with_trx(const Record &record, Trx *trx);
@@ -106,6 +109,8 @@ public:
    * @return RC
    */
   RC visit_record(const RID &rid, function<bool(Record &)> visitor);
+
+  RC get_record_values(const Record &record, Value *values);
 
 public:
   int32_t     table_id() const { return table_meta_.table_id(); }

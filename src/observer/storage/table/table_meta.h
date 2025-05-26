@@ -60,6 +60,7 @@ public:
   const IndexMeta *find_index_by_field(const char *field) const;
   const IndexMeta *index(int i) const;
   int              index_num() const;
+  int find_field_index_by_name(const char *name) const;
 
   const vector<string> &primary_keys() const { return primary_keys_; }
 
