@@ -112,7 +112,7 @@ RC DefaultConditionFilter::init(Table &table, const ConditionSqlNode &condition)
   // NOTE：这里没有实现不同类型的数据比较，比如整数跟浮点数之间的对比
   // 但是选手们还是要实现。这个功能在预选赛中会出现
 
-  if (condition.comp == LIKE_OP) {
+  if (condition.comp == LIKE_OP || condition.comp == NOT_LIKE_OP ) {
     // LIKE 操作要求两边都是字符串类型
     if (type_left != AttrType::CHARS || type_right != AttrType::CHARS) {
       LOG_WARN("LIKE operation requires string type on both sides");
@@ -149,8 +149,9 @@ bool DefaultConditionFilter::filter(const Record &rec) const
   }
 
   // 处理 LIKE 操作
-  if (comp_op_ == LIKE_OP) {
-    return like_match(left_value, right_value);
+  if (comp_op_ == LIKE_OP || comp_op_ == NOT_LIKE_OP ) {
+    bool match_result = like_match(left_value, right_value);
+    return (comp_op_ == LIKE_OP) ? match_result : !match_result;
   }
 
   int cmp_result = left_value.compare(right_value);

@@ -127,7 +127,7 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
 
   filter_unit->set_comp(comp);
 
-  if (comp == LIKE_OP) {
+  if (comp == LIKE_OP || comp == NOT_LIKE_OP ) {
     // 获取左右操作数的实际类型
     AttrType left_type = condition.left_is_attr ? 
         filter_unit->left().field.attr_type() : 
@@ -156,23 +156,24 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
         return RC::INVALID_ARGUMENT;
       }
     }
-  } else {
-    // 原有类型兼容性检查逻辑
-    AttrType left_type = condition.left_is_attr ? 
-        filter_unit->left().field.attr_type() : 
-        filter_unit->left().value.attr_type();
+  } 
+  // else {
+  //   // 原有类型兼容性检查逻辑
+  //   AttrType left_type = condition.left_is_attr ? 
+  //       filter_unit->left().field.attr_type() : 
+  //       filter_unit->left().value.attr_type();
     
-    AttrType right_type = condition.right_is_attr ? 
-        filter_unit->right().field.attr_type() : 
-        filter_unit->right().value.attr_type();
+  //   AttrType right_type = condition.right_is_attr ? 
+  //       filter_unit->right().field.attr_type() : 
+  //       filter_unit->right().value.attr_type();
 
-    if (left_type != right_type) {
-      LOG_WARN("type mismatch: left=%d, right=%d", left_type, right_type);
-      delete filter_unit;
-      filter_unit = nullptr;
-      return RC::SCHEMA_FIELD_TYPE_MISMATCH;
-    }
-  }
+  //   if (left_type != right_type) {
+  //     LOG_WARN("type mismatch: left=%d, right=%d", left_type, right_type);
+  //     delete filter_unit;
+  //     filter_unit = nullptr;
+  //     return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+  //   }
+  // }
 
   // 检查两个类型是否能够比较
   return rc;

@@ -127,7 +127,7 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
   int cmp_result = left.compare(right);
   result         = false;
 
-   if (comp_ == LIKE_OP) {
+   if (comp_ == LIKE_OP || comp_ == NOT_LIKE_OP) {
     // 确保两个值都是字符串类型
     if (left.attr_type() != AttrType::CHARS || right.attr_type() != AttrType::CHARS) {
       LOG_WARN("LIKE operator can only be used with string values");
@@ -141,7 +141,10 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
     std::string pattern_str = right.get_string();
     const char *pattern = pattern_str.c_str();
 
-    result = like_match(str, pattern);
+    bool like_result = like_match(str, pattern);
+
+    result = (comp_ == LIKE_OP) ? like_result : !like_result;
+
     return RC::SUCCESS;
   }
 
