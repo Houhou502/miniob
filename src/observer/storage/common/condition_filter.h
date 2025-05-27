@@ -63,6 +63,8 @@ private:
   ConDesc  right_;
   AttrType attr_type_ = AttrType::UNDEFINED;
   CompOp   comp_op_   = NO_OP;
+  bool like_match(const Value &left, const Value &right) const;
+  
 };
 
 class CompositeConditionFilter : public ConditionFilter

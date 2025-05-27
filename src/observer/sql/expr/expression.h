@@ -327,6 +327,8 @@ public:
    */
   RC compare_value(const Value &left, const Value &right, bool &value) const;
 
+  bool like_match(const char *str, const char *pattern) const;
+
   template <typename T>
   RC compare_column(const Column &left, const Column &right, vector<uint8_t> &result) const;
 

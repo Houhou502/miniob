@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details. */
 
 #include "condition_filter.h"
 #include "common/log/log.h"
+#include "common/type/attr_type.h"
 #include "common/value.h"
 #include "storage/record/record_manager.h"
 #include "storage/table/table.h"
@@ -110,8 +111,19 @@ RC DefaultConditionFilter::init(Table &table, const ConditionSqlNode &condition)
   //  }
   // NOTE：这里没有实现不同类型的数据比较，比如整数跟浮点数之间的对比
   // 但是选手们还是要实现。这个功能在预选赛中会出现
-  if (type_left != type_right) {
-    return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+
+  if (condition.comp == LIKE_OP) {
+    // LIKE 操作要求两边都是字符串类型
+    if (type_left != AttrType::CHARS || type_right != AttrType::CHARS) {
+      LOG_WARN("LIKE operation requires string type on both sides");
+      return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+    }
+  } 
+  else {
+    // 原有类型检查
+    if (type_left != type_right) {
+      return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+    }
   }
 
   return init(left, right, type_left, condition.comp);
@@ -134,6 +146,11 @@ bool DefaultConditionFilter::filter(const Record &rec) const
     right_value.set_data(rec.data() + right_.attr_offset, right_.attr_length);
   } else {
     right_value.set_value(right_.value);
+  }
+
+  // 处理 LIKE 操作
+  if (comp_op_ == LIKE_OP) {
+    return like_match(left_value, right_value);
   }
 
   int cmp_result = left_value.compare(right_value);
@@ -210,4 +227,47 @@ bool CompositeConditionFilter::filter(const Record &rec) const
     }
   }
   return true;
+}
+
+bool DefaultConditionFilter::like_match(const Value &left, const Value &right) const
+{
+  if (left.attr_type() != AttrType::CHARS || right.attr_type() != AttrType::CHARS) {
+    return false;
+  }
+
+  
+  std::string str_str = left.get_string();
+  const char *str = str_str.c_str();
+
+  std::string pattern_str = right.get_string();
+  const char *pattern = pattern_str.c_str();
+
+  if (str == nullptr || pattern == nullptr) {
+    return false;
+  }
+
+  while (*pattern) {
+    if (*pattern == '%') {
+      pattern++;
+      while (*str) {
+        if (like_match(Value(str), Value(pattern))) {
+          return true;
+        }
+        str++;
+      }
+      return *pattern == '\0';
+    } 
+    else if (*pattern == '_') {
+      if (*str == '\0') return false;
+      str++;
+      pattern++;
+    }
+    else {
+      if (*str != *pattern) return false;
+      str++;
+      pattern++;
+    }
+  }
+  return *str == '\0';
+
 }
