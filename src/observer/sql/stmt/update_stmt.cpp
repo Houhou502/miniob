@@ -3,13 +3,14 @@
 #include "common/type/attr_type.h"
 #include "storage/db/db.h"
 #include "storage/table/table.h"
+#include "sql/expr/expression.h"
 
 UpdateStmt::UpdateStmt(Table *table, const char *attribute_name, const Value *value, 
-                      const std::vector<ConditionSqlNode> &conditions)
-    : table_(table), attribute_name_(attribute_name), value_(value), conditions_(conditions)
+                       std::vector<ConditionSqlNode> &&conditions)
+    : table_(table), attribute_name_(attribute_name), value_(value), conditions_(std::move(conditions))
 {}
 
-RC UpdateStmt::create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt)
+RC UpdateStmt::create(Db *db, UpdateSqlNode &update_sql, Stmt *&stmt)
 {
   const char *table_name = update_sql.relation_name.c_str();
   if (nullptr == db || nullptr == table_name) {
@@ -53,6 +54,6 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt)
   stmt = new UpdateStmt(table, 
                        update_sql.attribute_name.c_str(), 
                        &update_sql.value,
-                       update_sql.conditions);
+                       std::move(update_sql.conditions));
   return RC::SUCCESS;
 }

@@ -62,6 +62,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %parse-param { ParsedSqlResult * sql_result }
 %parse-param { void * scanner }
 
+
+
 //标识tokens
 %token  SEMICOLON
         BY
@@ -435,12 +437,20 @@ value_list:
     ;
 value:
     NUMBER {
-      $$ = new Value((int)$1);
+      $$ = new Value($1);
       @$ = @1;
     }
-    |FLOAT {
-      $$ = new Value((float)$1);
+    | '-' NUMBER {
+      $$ = new Value(-$2);
+      @$ = @2;
+    }
+    | FLOAT {
+      $$ = new Value($1);
       @$ = @1;
+    }
+    | '-' FLOAT {
+      $$ = new Value(-$2);
+      @$ = @2;
     }
     |SSS {
       char *tmp = common::substr($1,1,strlen($1)-2);
@@ -619,89 +629,22 @@ condition_list:
     }
     | condition {
       $$ = new vector<ConditionSqlNode>;
-      $$->emplace_back(*$1);
+      $$->emplace_back(std::move(*$1));
       delete $1;
     }
     | condition AND condition_list {
       $$ = $3;
-      $$->emplace_back(*$1);
+      $$->emplace_back(std::move(*$1));
       delete $1;
     }
     ;
 condition:
-    rel_attr comp_op value
+    expression comp_op expression
     {
       $$ = new ConditionSqlNode;
-      $$->left_is_attr = 1;
-      $$->left_attr = *$1;
-      $$->right_is_attr = 0;
-      $$->right_value = *$3;
-      $$->comp = $2;
-
-      delete $1;
-      delete $3;
-    }
-    | value comp_op value 
-    {
-      $$ = new ConditionSqlNode;
-      $$->left_is_attr = 0;
-      $$->left_value = *$1;
-      $$->right_is_attr = 0;
-      $$->right_value = *$3;
-      $$->comp = $2;
-
-      delete $1;
-      delete $3;
-    }
-    | rel_attr comp_op rel_attr
-    {
-      $$ = new ConditionSqlNode;
-      $$->left_is_attr = 1;
-      $$->left_attr = *$1;
-      $$->right_is_attr = 1;
-      $$->right_attr = *$3;
-      $$->comp = $2;
-
-      delete $1;
-      delete $3;
-    }
-    | value comp_op rel_attr
-    {
-      $$ = new ConditionSqlNode;
-      $$->left_is_attr = 0;
-      $$->left_value = *$1;
-      $$->right_is_attr = 1;
-      $$->right_attr = *$3;
-      $$->comp = $2;
-
-      delete $1;
-      delete $3;
-    }
-    | rel_attr LIKE SSS
-    {
-      $$ = new ConditionSqlNode;
-      $$->left_is_attr = 1;
-      $$->left_attr = *$1;
-      $$->right_is_attr = 0;
-      char *tmp = common::substr($3, 1, strlen($3) - 2);
-      $$->right_value.set_string(tmp);
-      free(tmp);
-      $$->comp = LIKE_OP;
-
-      delete $1;
-    }
-    | rel_attr NOT LIKE SSS 
-    {
-      $$ = new ConditionSqlNode;
-      $$->left_is_attr = 1;
-      $$->left_attr = *$1;
-      $$->right_is_attr = 0;
-      char *tmp = common::substr($4, 1, strlen($4) - 2); 
-      $$->right_value.set_string(tmp);
-      free(tmp);
-      $$->comp = NOT_LIKE_OP;
-
-      delete $1;
+      $$->left_expr = std::unique_ptr<Expression>($1);
+      $$->right_expr = std::unique_ptr<Expression>($3);
+      $$->comp_op = $2;
     }
     ;
 

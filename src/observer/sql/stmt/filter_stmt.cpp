@@ -31,18 +31,21 @@ RC FilterStmt::create(Db *db, Table *default_table, unordered_map<string, Table 
     const ConditionSqlNode *conditions, int condition_num, FilterStmt *&stmt)
 {
   RC rc = RC::SUCCESS;
-  stmt  = nullptr;
+  stmt = nullptr;
 
   FilterStmt *tmp_stmt = new FilterStmt();
   for (int i = 0; i < condition_num; i++) {
+    const ConditionSqlNode &cond = conditions[i];
     FilterUnit *filter_unit = nullptr;
 
-    rc = create_filter_unit(db, default_table, tables, conditions[i], filter_unit);
+    // 创建过滤单元
+    rc = create_filter_unit(db, default_table, tables, cond, filter_unit);
     if (rc != RC::SUCCESS) {
       delete tmp_stmt;
       LOG_WARN("failed to create filter unit. condition index=%d", i);
       return rc;
     }
+
     tmp_stmt->filter_units_.push_back(filter_unit);
   }
 
@@ -50,131 +53,79 @@ RC FilterStmt::create(Db *db, Table *default_table, unordered_map<string, Table 
   return rc;
 }
 
-RC get_table_and_field(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
-    const RelAttrSqlNode &attr, Table *&table, const FieldMeta *&field)
-{
-  if (common::is_blank(attr.relation_name.c_str())) {
-    table = default_table;
-  } else if (nullptr != tables) {
-    auto iter = tables->find(attr.relation_name);
-    if (iter != tables->end()) {
-      table = iter->second;
-    }
-  } else {
-    table = db->find_table(attr.relation_name.c_str());
-  }
-  if (nullptr == table) {
-    LOG_WARN("No such table: attr.relation_name: %s", attr.relation_name.c_str());
-    return RC::SCHEMA_TABLE_NOT_EXIST;
-  }
-
-  field = table->table_meta().field(attr.attribute_name.c_str());
-  if (nullptr == field) {
-    LOG_WARN("no such field in table: table %s, field %s", table->name(), attr.attribute_name.c_str());
-    table = nullptr;
-    return RC::SCHEMA_FIELD_NOT_EXIST;
-  }
-
-  return RC::SUCCESS;
-}
-
-RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
-    const ConditionSqlNode &condition, FilterUnit *&filter_unit)
+RC FilterStmt::create_filter_unit(Db *db, Table *default_table, 
+    unordered_map<string, Table *> *tables, const ConditionSqlNode &cond,
+    FilterUnit *&filter_unit)
 {
   RC rc = RC::SUCCESS;
+  filter_unit = nullptr;
 
-  CompOp comp = condition.comp;
-  if (comp < EQUAL_TO || comp >= NO_OP) {
-    LOG_WARN("invalid compare operator : %d", comp);
+  // 创建新的过滤单元
+  FilterUnit *tmp_unit = new FilterUnit();
+  tmp_unit->set_comp(cond.comp_op);
+
+  // 处理左表达式
+  if (cond.left_expr) {
+    Expression *left_expr = nullptr;
+    rc = Expression::create_expression(db, default_table, tables, cond.left_expr.get(), left_expr);
+    if (rc != RC::SUCCESS) {
+      delete tmp_unit;
+      LOG_WARN("failed to create left expression");
+      return rc;
+    }
+    tmp_unit->set_left(left_expr);
+  } else {
+    // 如果没有表达式，保持原有逻辑（兼容性处理）
+    LOG_ERROR("left expression is null");
+    delete tmp_unit;
     return RC::INVALID_ARGUMENT;
   }
 
-  filter_unit = new FilterUnit;
-
-  if (condition.left_is_attr) {
-    Table           *table = nullptr;
-    const FieldMeta *field = nullptr;
-    rc                     = get_table_and_field(db, default_table, tables, condition.left_attr, table, field);
+  // 处理右表达式
+  if (cond.right_expr) {
+    Expression *right_expr = nullptr;
+    rc = Expression::create_expression(db, default_table, tables, cond.right_expr.get(), right_expr);
     if (rc != RC::SUCCESS) {
-      LOG_WARN("cannot find attr");
+      delete tmp_unit;
+      LOG_WARN("failed to create right expression");
       return rc;
     }
-    FilterObj filter_obj;
-    filter_obj.init_attr(Field(table, field));
-    filter_unit->set_left(filter_obj);
+    tmp_unit->set_right(right_expr);
   } else {
-    FilterObj filter_obj;
-    filter_obj.init_value(condition.left_value);
-    filter_unit->set_left(filter_obj);
+    // 如果没有表达式，保持原有逻辑（兼容性处理）
+    LOG_ERROR("right expression is null");
+    delete tmp_unit;
+    return RC::INVALID_ARGUMENT;
   }
 
-  if (condition.right_is_attr) {
-    Table           *table = nullptr;
-    const FieldMeta *field = nullptr;
-    rc                     = get_table_and_field(db, default_table, tables, condition.right_attr, table, field);
-    if (rc != RC::SUCCESS) {
-      LOG_WARN("cannot find attr");
-      return rc;
-    }
-    FilterObj filter_obj;
-    filter_obj.init_attr(Field(table, field));
-    filter_unit->set_right(filter_obj);
-  } else {
-    FilterObj filter_obj;
-    filter_obj.init_value(condition.right_value);
-    filter_unit->set_right(filter_obj);
-  }
-
-  filter_unit->set_comp(comp);
-
-  if (comp == LIKE_OP || comp == NOT_LIKE_OP ) {
-    // 获取左右操作数的实际类型
-    AttrType left_type = condition.left_is_attr ? 
-        filter_unit->left().field.attr_type() : 
-        filter_unit->left().value.attr_type();
-    
-    AttrType right_type = condition.right_is_attr ? 
-        filter_unit->right().field.attr_type() : 
-        filter_unit->right().value.attr_type();
-
-    // LIKE 操作要求两边都是字符串类型
-    if (left_type != AttrType::CHARS || right_type != AttrType::CHARS) {
-      LOG_WARN("LIKE operation requires string type on both sides");
-      delete filter_unit;
-      filter_unit = nullptr;
-      return RC::SCHEMA_FIELD_TYPE_MISMATCH;
-    }
-
-    // 如果右侧是值，检查是否是有效的LIKE模式
-    if (!condition.right_is_attr) {
-      std::string pattern_str = condition.right_value.get_string();
-      const char *pattern = pattern_str.c_str();
-      if (pattern == nullptr) {
-        LOG_WARN("LIKE pattern cannot be null");
-        delete filter_unit;
-        filter_unit = nullptr;
-        return RC::INVALID_ARGUMENT;
-      }
-    }
-  } 
-  // else {
-  //   // 原有类型兼容性检查逻辑
-  //   AttrType left_type = condition.left_is_attr ? 
-  //       filter_unit->left().field.attr_type() : 
-  //       filter_unit->left().value.attr_type();
-    
-  //   AttrType right_type = condition.right_is_attr ? 
-  //       filter_unit->right().field.attr_type() : 
-  //       filter_unit->right().value.attr_type();
-
-  //   if (left_type != right_type) {
-  //     LOG_WARN("type mismatch: left=%d, right=%d", left_type, right_type);
-  //     delete filter_unit;
-  //     filter_unit = nullptr;
-  //     return RC::SCHEMA_FIELD_TYPE_MISMATCH;
-  //   }
-  // }
-
-  // 检查两个类型是否能够比较
-  return rc;
+  filter_unit = tmp_unit;
+  return RC::SUCCESS;
 }
+
+// RC get_table_and_field(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
+//     const RelAttrSqlNode &attr, Table *&table, const FieldMeta *&field)
+// {
+//   if (common::is_blank(attr.relation_name.c_str())) {
+//     table = default_table;
+//   } else if (nullptr != tables) {
+//     auto iter = tables->find(attr.relation_name);
+//     if (iter != tables->end()) {
+//       table = iter->second;
+//     }
+//   } else {
+//     table = db->find_table(attr.relation_name.c_str());
+//   }
+//   if (nullptr == table) {
+//     LOG_WARN("No such table: attr.relation_name: %s", attr.relation_name.c_str());
+//     return RC::SCHEMA_TABLE_NOT_EXIST;
+//   }
+
+//   field = table->table_meta().field(attr.attribute_name.c_str());
+//   if (nullptr == field) {
+//     LOG_WARN("no such field in table: table %s, field %s", table->name(), attr.attribute_name.c_str());
+//     table = nullptr;
+//     return RC::SCHEMA_FIELD_NOT_EXIST;
+//   }
+
+//   return RC::SUCCESS;
+// }

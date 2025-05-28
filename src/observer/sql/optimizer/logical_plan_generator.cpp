@@ -16,6 +16,7 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/log/log.h"
 
+#include "common/type/attr_type.h"
 #include "sql/operator/calc_logical_operator.h"
 #include "sql/operator/delete_logical_operator.h"
 #include "sql/operator/explain_logical_operator.h"
@@ -155,81 +156,107 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   return RC::SUCCESS;
 }
 
-RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<LogicalOperator> &logical_operator)
+RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, std::unique_ptr<LogicalOperator> &logical_operator)
 {
-  RC                                  rc = RC::SUCCESS;
-  vector<unique_ptr<Expression>> cmp_exprs;
-  const vector<FilterUnit *>    &filter_units = filter_stmt->filter_units();
+  RC rc = RC::SUCCESS;
+  std::vector<std::unique_ptr<Expression>> cmp_exprs;
+  const std::vector<FilterUnit *> &filter_units = filter_stmt->filter_units();
+
   for (const FilterUnit *filter_unit : filter_units) {
-    const FilterObj &filter_obj_left  = filter_unit->left();
-    const FilterObj &filter_obj_right = filter_unit->right();
+    Expression *left_raw = filter_unit->left();   // 非 owning 指针
+    Expression *right_raw = filter_unit->right(); // 非 owning 指针
 
-    unique_ptr<Expression> left(filter_obj_left.is_attr
-                                    ? static_cast<Expression *>(new FieldExpr(filter_obj_left.field))
-                                    : static_cast<Expression *>(new ValueExpr(filter_obj_left.value)));
+    if (left_raw == nullptr || right_raw == nullptr) {
+      LOG_WARN("null expression in filter unit");
+      return RC::INVALID_ARGUMENT;
+    }
 
-    unique_ptr<Expression> right(filter_obj_right.is_attr
-                                     ? static_cast<Expression *>(new FieldExpr(filter_obj_right.field))
-                                     : static_cast<Expression *>(new ValueExpr(filter_obj_right.value)));
+    std::unique_ptr<Expression> left = left_raw->copy();   // 创建副本
+    std::unique_ptr<Expression> right = right_raw->copy(); // 创建副本
 
+    // 尝试做类型统一（插入 CastExpr）
     if (left->value_type() != right->value_type()) {
-      auto left_to_right_cost = implicit_cast_cost(left->value_type(), right->value_type());
-      auto right_to_left_cost = implicit_cast_cost(right->value_type(), left->value_type());
+      int left_to_right_cost = implicit_cast_cost(left->value_type(), right->value_type());
+      int right_to_left_cost = implicit_cast_cost(right->value_type(), left->value_type());
+
       if (left_to_right_cost <= right_to_left_cost && left_to_right_cost != INT32_MAX) {
         ExprType left_type = left->type();
-        auto cast_expr = make_unique<CastExpr>(std::move(left), right->value_type());
+        auto cast_expr = std::make_unique<CastExpr>(std::move(left), right->value_type());
+
         if (left_type == ExprType::VALUE) {
-          Value left_val;
-          if (OB_FAIL(rc = cast_expr->try_get_value(left_val)))
-          {
-            LOG_WARN("failed to get value from left child", strrc(rc));
+          Value casted_val;
+          rc = cast_expr->try_get_value(casted_val);
+          if (rc != RC::SUCCESS) {
+            LOG_WARN("Failed to try_get_value for left cast: %s", strrc(rc));
             return rc;
           }
-          left = make_unique<ValueExpr>(left_val);
+          left = std::make_unique<ValueExpr>(casted_val);
         } else {
           left = std::move(cast_expr);
         }
-      } else if (right_to_left_cost < left_to_right_cost && right_to_left_cost != INT32_MAX) {
+
+      } else if (right_to_left_cost != INT32_MAX) {
         ExprType right_type = right->type();
-        auto cast_expr = make_unique<CastExpr>(std::move(right), left->value_type());
+        auto cast_expr = std::make_unique<CastExpr>(std::move(right), left->value_type());
+
         if (right_type == ExprType::VALUE) {
-          Value right_val;
-          if (OB_FAIL(rc = cast_expr->try_get_value(right_val)))
-          {
-            LOG_WARN("failed to get value from right child", strrc(rc));
+          Value casted_val;
+          rc = cast_expr->try_get_value(casted_val);
+          if (rc != RC::SUCCESS) {
+            LOG_WARN("Failed to try_get_value for right cast: %s", strrc(rc));
             return rc;
           }
-          right = make_unique<ValueExpr>(right_val);
+          right = std::make_unique<ValueExpr>(casted_val);
         } else {
           right = std::move(cast_expr);
         }
 
       } else {
-        rc = RC::UNSUPPORTED;
-        LOG_WARN("unsupported cast from %s to %s", attr_type_to_string(left->value_type()), attr_type_to_string(right->value_type()));
-        return rc;
+        LOG_WARN("Unsupported implicit cast from %s to %s",
+                 attr_type_to_string(left->value_type()),
+                 attr_type_to_string(right->value_type()));
+        return RC::UNSUPPORTED;
       }
     }
 
-    ComparisonExpr *cmp_expr = new ComparisonExpr(filter_unit->comp(), std::move(left), std::move(right));
-    cmp_exprs.emplace_back(cmp_expr);
+    auto cmp_expr = std::make_unique<ComparisonExpr>(filter_unit->comp(),
+                                                     std::move(left),
+                                                     std::move(right));
+    cmp_exprs.emplace_back(std::move(cmp_expr));
   }
 
-  unique_ptr<PredicateLogicalOperator> predicate_oper;
   if (!cmp_exprs.empty()) {
-    unique_ptr<ConjunctionExpr> conjunction_expr(new ConjunctionExpr(ConjunctionExpr::Type::AND, cmp_exprs));
-    predicate_oper = unique_ptr<PredicateLogicalOperator>(new PredicateLogicalOperator(std::move(conjunction_expr)));
+    auto conjunction_expr = std::make_unique<ConjunctionExpr>(ConjunctionExpr::Type::AND, cmp_exprs);
+    logical_operator = std::make_unique<PredicateLogicalOperator>(std::move(conjunction_expr));
+  } else {
+    logical_operator = nullptr; // no filters
   }
 
-  logical_operator = std::move(predicate_oper);
   return rc;
 }
 
 int LogicalPlanGenerator::implicit_cast_cost(AttrType from, AttrType to)
 {
+  {
   if (from == to) {
-    return 0;
+    return 0;  // 无需转换
   }
+
+  // 支持数字类型之间的隐式转换，代价越小越优先选择
+  if (from == AttrType::INTS && to == AttrType::FLOATS) {
+    return 1;  // int -> float
+  } else if (from == AttrType::FLOATS && to == AttrType::INTS) {
+    return 2;  // float -> int，稍贵
+  }
+
+  // 拓展：支持字符串转数字，代价更高（举例）
+  if ((from == AttrType::CHARS && to == AttrType::INTS) || (from == AttrType::CHARS && to == AttrType::FLOATS)) {
+    return 3;
+  }
+
+  // 不支持其他转化
+  return INT32_MAX;  // 不允许隐式转换
+}
   return DataType::type_instance(from)->cast_cost(to);
 }
 
@@ -242,7 +269,6 @@ RC LogicalPlanGenerator::create_plan(InsertStmt *insert_stmt, unique_ptr<Logical
   logical_operator.reset(insert_operator);
   return RC::SUCCESS;
 }
-
 
 RC LogicalPlanGenerator::create_plan(UpdateStmt *update_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {

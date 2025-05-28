@@ -128,6 +128,20 @@ public:
    */
   virtual RC eval(Chunk &chunk, vector<uint8_t> &select) { return RC::UNIMPLEMENTED; }
 
+
+  static RC get_table_and_field(Db *db,
+                       Table *default_table,
+                       std::unordered_map<std::string, Table *> *tables,
+                       const RelAttrSqlNode &attr,
+                       Table *&table,
+                       const FieldMeta *&field);
+
+  /** 
+   * @brief 从 Unbound 表达式生成绑定后的表达式
+   */
+  static RC create_expression(Db *db,Table *default_table,std::unordered_map<std::string, Table *> *tables,const Expression *unbound_expr,Expression *&expr);
+
+
 protected:
   /**
    * @brief 表达式在下层算子返回的 chunk 中的位置
@@ -277,6 +291,7 @@ public:
   AttrType value_type() const override { return cast_type_; }
 
   unique_ptr<Expression> &child() { return child_; }
+  const unique_ptr<Expression> &child() const { return child_; }
 
 private:
   RC cast(const Value &value, Value &cast_value) const;
@@ -313,7 +328,9 @@ public:
   RC eval(Chunk &chunk, vector<uint8_t> &select) override;
 
   unique_ptr<Expression> &left() { return left_; }
+  const unique_ptr<Expression> &left() const { return left_; }
   unique_ptr<Expression> &right() { return right_; }
+  const unique_ptr<Expression> &right() const { return right_; }
 
   /**
    * 尝试在没有tuple的情况下获取当前表达式的值
@@ -430,7 +447,9 @@ public:
   Type arithmetic_type() const { return arithmetic_type_; }
 
   unique_ptr<Expression> &left() { return left_; }
+  const unique_ptr<Expression> &left() const { return left_; }
   unique_ptr<Expression> &right() { return right_; }
+  const unique_ptr<Expression> &right() const { return right_; }
 
 private:
   RC calc_value(const Value &left_value, const Value &right_value, Value &value) const;
@@ -463,6 +482,7 @@ public:
   const char *aggregate_name() const { return aggregate_name_.c_str(); }
 
   unique_ptr<Expression> &child() { return child_; }
+  const unique_ptr<Expression> &child() const { return child_; }
 
   RC       get_value(const Tuple &tuple, Value &value) const override { return RC::INTERNAL; }
   AttrType value_type() const override { return child_->value_type(); }

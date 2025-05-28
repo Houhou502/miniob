@@ -14,8 +14,10 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
-#include "common/lang/unordered_map.h"
-#include "common/lang/vector.h"
+#include <vector>
+#include <unordered_map>
+#include <string>
+
 #include "sql/expr/expression.h"
 #include "sql/parser/parse_defs.h"
 #include "sql/stmt/stmt.h"
@@ -24,50 +26,32 @@ class Db;
 class Table;
 class FieldMeta;
 
-struct FilterObj
-{
-  bool  is_attr;
-  Field field;
-  Value value;
-
-  void init_attr(const Field &field)
-  {
-    is_attr     = true;
-    this->field = field;
-  }
-
-  void init_value(const Value &value)
-  {
-    is_attr     = false;
-    this->value = value;
-  }
-};
-
 class FilterUnit
 {
 public:
   FilterUnit() = default;
-  ~FilterUnit() {}
+  ~FilterUnit() {
+    // FilterUnit 自身不会删除表达式，释放操作由 FilterStmt 统一处理
+  }
 
   void set_comp(CompOp comp) { comp_ = comp; }
-
   CompOp comp() const { return comp_; }
 
-  void set_left(const FilterObj &obj) { left_ = obj; }
-  void set_right(const FilterObj &obj) { right_ = obj; }
+  void set_left(Expression *expr) { left_ = expr; }
+  void set_right(Expression *expr) { right_ = expr; }
 
-  const FilterObj &left() const { return left_; }
-  const FilterObj &right() const { return right_; }
+  Expression* left() const { return left_; }
+  Expression* right() const { return right_; }
 
 private:
-  CompOp    comp_ = NO_OP;
-  FilterObj left_;
-  FilterObj right_;
+  CompOp comp_ = NO_OP;
+  Expression *left_ = nullptr;   // 左表达式
+  Expression *right_ = nullptr;  // 右表达式
 };
 
 /**
- * @brief Filter/谓词/过滤语句
- * @ingroup Statement
+ * @brief FilterStmt 用于存储 WHERE 子句对应的过滤表达式。
+ *        每个 FilterUnit 表示一个条件表达式，如 A > B
  */
 class FilterStmt
 {
@@ -75,16 +59,31 @@ public:
   FilterStmt() = default;
   virtual ~FilterStmt();
 
-public:
-  const vector<FilterUnit *> &filter_units() const { return filter_units_; }
+  const std::vector<FilterUnit *> &filter_units() const { return filter_units_; }
 
-public:
-  static RC create(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
-      const ConditionSqlNode *conditions, int condition_num, FilterStmt *&stmt);
+  /**
+   * 创建 FilterStmt 对象，对应 WHERE 子句
+   * @param db 当前数据库指针
+   * @param default_table SQL 解析时默认的表
+   * @param tables 多表查询时的表名映射
+   * @param conditions 条件数组
+   * @param condition_num 条件个数
+   * @param stmt 创建出的 FilterStmt 指针
+   */
+  static RC create(Db *db, Table *default_table,
+                   std::unordered_map<std::string, Table *> *tables,
+                   const ConditionSqlNode *conditions,
+                   int condition_num,
+                   FilterStmt *&stmt);
 
-  static RC create_filter_unit(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
-      const ConditionSqlNode &condition, FilterUnit *&filter_unit);
+  /**
+   * 创建 FilterUnit 对象
+   */
+  static RC create_filter_unit(Db *db, Table *default_table,
+                               std::unordered_map<std::string, Table *> *tables,
+                               const ConditionSqlNode &condition,
+                               FilterUnit *&filter_unit);
 
 private:
-  vector<FilterUnit *> filter_units_;  // 默认当前都是AND关系
+  std::vector<FilterUnit *> filter_units_;  // 用于保存所有过滤条件（AND 连接）
 };

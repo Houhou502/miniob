@@ -17,8 +17,201 @@ See the Mulan PSL v2 for more details. */
 #include "sql/expr/tuple.h"
 #include "sql/expr/arithmetic_operator.hpp"
 #include "sql/parser/parse_defs.h"
+#include "storage/db/db.h"
 
 using namespace std;
+
+RC Expression::get_table_and_field(Db *db,
+                       Table *default_table,
+                       std::unordered_map<std::string, Table *> *tables,
+                       const RelAttrSqlNode &attr,
+                       Table *&table,
+                       const FieldMeta *&field)
+{
+  table = nullptr;
+  field = nullptr;
+
+  const std::string &relation_name = attr.relation_name;
+  const std::string &attribute_name = attr.attribute_name;
+
+  // 1. 查找表
+  if (common::is_blank(relation_name.c_str())) {
+    // 没有指定表名，使用默认表
+    table = default_table;
+  } else if (tables != nullptr) {
+    // 有多表查询，使用表名映射表
+    auto iter = tables->find(relation_name);
+    if (iter != tables->end()) {
+      table = iter->second;
+    }
+  }
+
+  // 如果 tables 中找不到，尝试直接从 DB 查找
+  if (table == nullptr) {
+    table = db->find_table(relation_name.c_str());
+  }
+
+  if (table == nullptr) {
+    LOG_WARN("No such table: %s", relation_name.c_str());
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+
+  // 2. 查找字段
+  field = table->table_meta().field(attribute_name.c_str());
+  if (field == nullptr) {
+    LOG_WARN("No such field in table %s: %s", table->name(), attribute_name.c_str());
+    table = nullptr;
+    return RC::SCHEMA_FIELD_NOT_EXIST;
+  }
+
+  return RC::SUCCESS;
+}
+
+RC Expression::create_expression(Db *db,
+                                 Table *default_table,
+                                 std::unordered_map<std::string, Table *> *tables,
+                                 const Expression *unbound_expr,
+                                 Expression *&expr)
+{
+  expr = nullptr;
+
+  if (unbound_expr == nullptr) {
+    LOG_ERROR("Expression is null");
+    return RC::INVALID_ARGUMENT;
+  }
+
+  switch (unbound_expr->type()) {
+
+    case ExprType::UNBOUND_FIELD: {
+      const UnboundFieldExpr *uf = static_cast<const UnboundFieldExpr *>(unbound_expr);
+
+      Table *table = nullptr;
+      const FieldMeta *field = nullptr;
+
+      RelAttrSqlNode attr;
+      attr.relation_name = uf->table_name();
+      attr.attribute_name = uf->field_name();
+
+      RC rc = get_table_and_field(db, default_table, tables, attr, table, field);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("Cannot find field: %s.%s", attr.relation_name.c_str(), attr.attribute_name.c_str());
+        return rc;
+      }
+
+      expr = new FieldExpr(table, field);
+      return RC::SUCCESS;
+    }
+
+    case ExprType::VALUE: {
+      const ValueExpr *val_expr = static_cast<const ValueExpr *>(unbound_expr);
+      expr = new ValueExpr(val_expr->get_value());
+      return RC::SUCCESS;
+    }
+
+    case ExprType::UNBOUND_AGGREGATION: {
+      const UnboundAggregateExpr *ua_expr = static_cast<const UnboundAggregateExpr *>(unbound_expr);
+
+      Expression *child_expr = nullptr;
+      RC rc = Expression::create_expression(db, default_table, tables, ua_expr->child().get(), child_expr);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("Failed to resolve unbound aggregation child");
+        return rc;
+      }
+
+      AggregateExpr::Type agg_type;
+      rc = AggregateExpr::type_from_string(ua_expr->aggregate_name(), agg_type);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("Invalid aggregation type: %s", ua_expr->aggregate_name());
+        delete child_expr;
+        return rc;
+      }
+
+      expr = new AggregateExpr(agg_type, child_expr);
+      return RC::SUCCESS;
+    }
+
+    case ExprType::CAST: {
+      const CastExpr *cast_expr = static_cast<const CastExpr *>(unbound_expr);
+
+      Expression *child_expr = nullptr;
+      RC rc = Expression::create_expression(db, default_table, tables, cast_expr->child().get(), child_expr);
+      if (rc != RC::SUCCESS) {
+        return rc;
+      }
+
+      expr = new CastExpr(std::unique_ptr<Expression>(child_expr), cast_expr->value_type());
+      return RC::SUCCESS;
+    }
+
+    case ExprType::COMPARISON: {
+      const ComparisonExpr *cmp_expr = static_cast<const ComparisonExpr *>(unbound_expr);
+
+      Expression *left_expr = nullptr;
+      RC rc = Expression::create_expression(db, default_table, tables, cmp_expr->left().get(), left_expr);
+      if (rc != RC::SUCCESS) {
+        return rc;
+      }
+
+      Expression *right_expr = nullptr;
+      rc = Expression::create_expression(db, default_table, tables, cmp_expr->right().get(), right_expr);
+      if (rc != RC::SUCCESS) {
+        delete left_expr;
+        return rc;
+      }
+
+      expr = new ComparisonExpr(cmp_expr->comp(),
+                                std::unique_ptr<Expression>(left_expr),
+                                std::unique_ptr<Expression>(right_expr));
+      return RC::SUCCESS;
+    }
+
+    // case ExprType::CONJUNCTION: {
+    //   const ConjunctionExpr *conj_expr = static_cast<const ConjunctionExpr *>(unbound_expr);
+
+    //   std::vector<std::unique_ptr<Expression>> children;
+    //   for (const auto &child : conj_expr->children()) {
+    //     Expression *sub_expr = nullptr;
+    //     RC rc = Expression::create_expression(db, default_table, tables, child.get(), sub_expr);
+    //     if (rc != RC::SUCCESS) {
+    //       return rc;
+    //     }
+    //     children.emplace_back(sub_expr);
+    //   }
+
+    //   expr = new ConjunctionExpr(conj_expr->conjunction_type(), children);
+    //   return RC::SUCCESS;
+    // }
+
+    case ExprType::ARITHMETIC: {
+      const ArithmeticExpr *arith_expr = static_cast<const ArithmeticExpr *>(unbound_expr);
+
+      Expression *left_expr = nullptr;
+      RC rc = Expression::create_expression(db, default_table, tables, arith_expr->left().get(), left_expr);
+      if (rc != RC::SUCCESS) {
+        return rc;
+      }
+
+      Expression *right_expr = nullptr;
+      if (arith_expr->right()) {
+        rc = Expression::create_expression(db, default_table, tables, arith_expr->right().get(), right_expr);
+        if (rc != RC::SUCCESS) {
+          delete left_expr;
+          return rc;
+        }
+      }
+
+      expr = new ArithmeticExpr(arith_expr->arithmetic_type(),
+                                std::unique_ptr<Expression>(left_expr),
+                                std::unique_ptr<Expression>(right_expr));
+      return RC::SUCCESS;
+    }
+
+    default: {
+      LOG_WARN("Unsupported expression type: %d", static_cast<int>(unbound_expr->type()));
+      return RC::UNIMPLEMENTED;
+    }
+  }
+}
 
 RC FieldExpr::get_value(const Tuple &tuple, Value &value) const
 {
