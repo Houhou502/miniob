@@ -102,6 +102,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         AND
         NOT
         LIKE
+        NULL_T
         SET
         ON
         LOAD

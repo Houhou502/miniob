@@ -237,7 +237,6 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, std::unique_ptr<Lo
 
 int LogicalPlanGenerator::implicit_cast_cost(AttrType from, AttrType to)
 {
-  {
   if (from == to) {
     return 0;  // 无需转换
   }
@@ -249,15 +248,8 @@ int LogicalPlanGenerator::implicit_cast_cost(AttrType from, AttrType to)
     return 2;  // float -> int，稍贵
   }
 
-  // 拓展：支持字符串转数字，代价更高（举例）
-  if ((from == AttrType::CHARS && to == AttrType::INTS) || (from == AttrType::CHARS && to == AttrType::FLOATS)) {
-    return 3;
-  }
-
-  // 不支持其他转化
-  return INT32_MAX;  // 不允许隐式转换
-}
   return DataType::type_instance(from)->cast_cost(to);
+  
 }
 
 RC LogicalPlanGenerator::create_plan(InsertStmt *insert_stmt, unique_ptr<LogicalOperator> &logical_operator)

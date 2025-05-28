@@ -198,7 +198,21 @@ RC Expression::create_expression(Db *db,
           delete left_expr;
           return rc;
         }
+      } else {
+      // 一元运算处理：
+      // - 仅支持一元负号（ARITH_UNARY_MINUS），其他一元运算符需扩展
+        if (arith_expr->arithmetic_type() ==  ArithmeticExpr::Type::NEGATIVE) {
+        // 创建右操作数为 0 的 ValueExpr
+        Value zero_value;
+        zero_value.set_int(0); // 根据实际类型设置（如整数、浮点数）
+        right_expr = new ValueExpr(zero_value);
+        } else {
+          // 不支持的一元运算符，返回错误
+          delete left_expr;
+          return RC::SQL_SYNTAX;
+        }
       }
+      
 
       expr = new ArithmeticExpr(arith_expr->arithmetic_type(),
                                 std::unique_ptr<Expression>(left_expr),
@@ -689,6 +703,11 @@ RC ArithmeticExpr::get_value(const Tuple &tuple, Value &value) const
 
   Value left_value;
   Value right_value;
+
+  if (!left_ || !right_) {
+    LOG_ERROR("ArithmeticExpr: left or right operand is null");
+    return RC::INTERNAL;
+  }
 
   rc = left_->get_value(tuple, left_value);
   if (rc != RC::SUCCESS) {
