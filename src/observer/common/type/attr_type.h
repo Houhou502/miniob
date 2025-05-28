@@ -22,7 +22,9 @@ enum class AttrType
   DATES,     ///< 日期类型
   FLOATS,    ///< 浮点数类型(4字节)
   VECTORS,   ///< 向量类型
+  NULLS,     ///< null类型
   BOOLEANS,  ///< boolean类型，当前不是由parser解析出来的，是程序内部使用的
+
   MAXTYPE,   ///< 请在 UNDEFINED 与 MAXTYPE 之间增加新类型
 };
 

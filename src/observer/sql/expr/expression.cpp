@@ -466,12 +466,18 @@ RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
     return rc;
   }
 
+  if (left_value.is_null() || right_value.is_null()) {
+    value.set_null(); 
+    return RC::SUCCESS;
+  }
+
   bool bool_value = false;
 
   rc = compare_value(left_value, right_value, bool_value);
   if (rc == RC::SUCCESS) {
     value.set_boolean(bool_value);
   }
+
   return rc;
 }
 
@@ -696,29 +702,45 @@ RC ArithmeticExpr::execute_calc(
   }
   return rc;
 }
-
 RC ArithmeticExpr::get_value(const Tuple &tuple, Value &value) const
 {
   RC rc = RC::SUCCESS;
 
-  Value left_value;
-  Value right_value;
+  if (arithmetic_type_ == Type::NEGATIVE) {
+    if (!left_) {
+      LOG_ERROR("Unary NEGATIVE expression missing left operand");
+      return RC::INTERNAL;
+    }
+    Value operand;
+    rc = left_->get_value(tuple, operand);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to get value of NEGATIVE's operand. rc=%s", strrc(rc));
+      return rc;
+    }
+    return calc_value(operand, Value(), value); // pass dummy right
+  }
 
+  // Binary expression: ADD, SUB, *, /
   if (!left_ || !right_) {
-    LOG_ERROR("ArithmeticExpr: left or right operand is null");
+    LOG_ERROR("Binary ArithmeticExpr missing operand");
     return RC::INTERNAL;
   }
+
+  Value left_value;
+  Value right_value;
 
   rc = left_->get_value(tuple, left_value);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
     return rc;
   }
+
   rc = right_->get_value(tuple, right_value);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));
     return rc;
   }
+
   return calc_value(left_value, right_value, value);
 }
 
