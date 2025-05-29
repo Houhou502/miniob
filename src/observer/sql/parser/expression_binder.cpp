@@ -366,6 +366,26 @@ RC check_aggregate_expression(AggregateExpr &expression)
   // 校验数据类型与聚合类型是否匹配
   AggregateExpr::Type aggregate_type   = expression.aggregate_type();
   AttrType            child_value_type = child_expression->value_type();
+
+  // 特殊处理 COUNT(*)
+  if (aggregate_type == AggregateExpr::Type::COUNT) {
+    if (child_expression && child_expression->type() == ExprType::STAR) {
+      return RC::SUCCESS;  // COUNT(*) 是合法的
+    }
+  }
+
+  // 非 COUNT(*) 的情况必须有子表达式
+  if (nullptr == child_expression) {
+    LOG_WARN("child expression of aggregate expression is null");
+    return RC::INVALID_ARGUMENT;
+  }
+
+  // 检查子表达式是否为 STAR（非法情况：SUM(*), AVG(*) 等）
+  if (child_expression->type() == ExprType::STAR) {
+    LOG_WARN("only COUNT() supports * argument");
+    return RC::INVALID_ARGUMENT;
+  }
+
   switch (aggregate_type) {
     case AggregateExpr::Type::SUM:
     case AggregateExpr::Type::AVG: {
@@ -413,6 +433,16 @@ RC ExpressionBinder::bind_aggregate_expression(
   if (OB_FAIL(rc)) {
     LOG_WARN("invalid aggregate name: %s", aggregate_name);
     return rc;
+  }
+
+  if (expr == nullptr || expr->type() != ExprType::UNBOUND_AGGREGATION) {
+    return RC::INVALID_ARGUMENT;
+  }
+
+  // 检查参数数量（聚合函数必须有且只有一个参数，COUNT(*) 除外）
+  if (unbound_aggregate_expr->child() == nullptr) {
+    LOG_WARN("aggregate function %s() requires exactly 1 argument", aggregate_name);
+    return RC::INVALID_ARGUMENT;
   }
 
   unique_ptr<Expression>        &child_expr = unbound_aggregate_expr->child();

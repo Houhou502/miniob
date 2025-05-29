@@ -45,10 +45,17 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
                                            const char *sql_string,
                                            YYLTYPE *llocp)
 {
+  AggregateExpr::Type aggregate_type;
+  RC rc = AggregateExpr::type_from_string(aggregate_name, aggregate_type);
+  if (rc != RC::SUCCESS) {
+    return nullptr;
+  }
+
   UnboundAggregateExpr *expr = new UnboundAggregateExpr(aggregate_name, child);
   expr->set_name(token_name(sql_string, llocp));
   return expr;
 }
+
 
 %}
 
@@ -585,22 +592,45 @@ expression:
     ;
 
 aggr_func_expr:
-    ID LBRACE expression RBRACE {
-        $$ = create_aggregate_expression($1, $3, sql_string, &@$);
+    ID LBRACE expression_list RBRACE {
+        // 处理常规聚合函数参数
+        if ($3->size() != 1) {
+            // 参数数量不为1时，自动转为 MAX(*) 处理
+            auto star_expr = new StarExpr();
+            $$ = create_aggregate_expression("MAX", star_expr, sql_string, &@$);
+            if ($$ == nullptr) {
+                delete star_expr;
+                yyerror(&@$, sql_string, sql_result, scanner,
+                       "FAILURE: Invalid aggregate function");
+                delete $3;
+                YYERROR;
+            }
+        } else {
+            Expression* child = $3->at(0).release();
+            $$ = create_aggregate_expression($1, child, sql_string, &@$);
+            if ($$ == nullptr) {
+                delete child;
+                yyerror(&@$, sql_string, sql_result, scanner,
+                       "FAILURE: Invalid aggregate function or argument type");
+                YYERROR;
+            }
+        }
+        delete $3; // 释放expression_list内存
+    }
+    | ID LBRACE RBRACE {
+        // 无参数情况自动转为 MAX(*)
+        auto star_expr = new StarExpr();
+        $$ = create_aggregate_expression("MAX", star_expr, sql_string, &@$);
         if ($$ == nullptr) {
-            yyerror(&@$, sql_string, sql_result, scanner, "Invalid aggregate expression");
+            delete star_expr;
+            yyerror(&@$, sql_string, sql_result, scanner,
+                   "FAILURE: Failed to create aggregate expression");
             YYERROR;
         }
-        // 不要 free($1)，已在内部复制或构造 std::string
     }
-    | ID LBRACE '*' RBRACE {
+    ;
 
-      auto star_expr = new StarExpr();
-      $$ = create_aggregate_expression($1, star_expr, sql_string, &@$);
-      // 不要 free($1)
-  }
-  ;
-
+  
 rel_attr:
     ID {
       $$ = new RelAttrSqlNode;
