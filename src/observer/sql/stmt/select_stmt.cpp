@@ -64,6 +64,44 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   // collect query fields in `select` statement
   vector<unique_ptr<Expression>> bound_expressions;
   ExpressionBinder expression_binder(binder_context);
+
+  bool has_agg = false;
+  for (unique_ptr<Expression> &expression : select_sql.expressions) {
+    if (expression->type() == ExprType::UNBOUND_AGGREGATION) {
+      has_agg = true;
+      break;
+    }
+  }
+
+  if (has_agg) {
+    for (unique_ptr<Expression> &select_expr : select_sql.expressions) {
+      if (select_expr->type() == ExprType::UNBOUND_AGGREGATION) {
+        continue;
+      }
+
+      // 聚合函数的算术运算
+      if (select_expr->type() == ExprType::ARITHMETIC) {
+        ArithmeticExpr *arith_expr = static_cast<ArithmeticExpr *>(select_expr.get());
+        if (arith_expr->left() != nullptr && arith_expr->left()->type() == ExprType::UNBOUND_AGGREGATION &&
+            arith_expr->right() != nullptr && arith_expr->right()->type() == ExprType::UNBOUND_AGGREGATION) {
+          continue;
+        }
+      }
+
+      bool found = false;
+      for (unique_ptr<Expression> &group_by_expr : select_sql.group_by) {
+        if (select_expr->equal(*group_by_expr)) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        LOG_WARN("non-aggregate expression not in group by");
+        return RC::INVALID_ARGUMENT;
+      }
+    }
+  }
+
   
   for (unique_ptr<Expression> &expression : select_sql.expressions) {
     RC rc = expression_binder.bind_expression(expression, bound_expressions);

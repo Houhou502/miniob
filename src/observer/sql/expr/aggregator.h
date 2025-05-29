@@ -35,3 +35,46 @@ public:
   RC accumulate(const Value &value) override;
   RC evaluate(Value &result) override;
 };
+
+class MaxAggregator : public Aggregator
+{
+public:
+  RC accumulate(const Value &value) override;
+  RC evaluate(Value &result) override;
+
+private:
+  bool has_value_ = false;
+
+};
+
+class MinAggregator : public Aggregator
+{
+public:
+  RC accumulate(const Value &value) override;
+  RC evaluate(Value &result) override;
+
+private:
+  bool has_value_ = false;
+};
+
+class AvgAggregator : public Aggregator
+{
+public:
+  RC accumulate(const Value &value) override;
+  RC evaluate(Value &result) override;
+
+private:
+  int count_ = 0;  // 统计数量，进行平均
+  Value sum_;
+};
+
+class CountAggregator : public Aggregator
+{
+public:
+  RC accumulate(const Value &value) override;
+  RC evaluate(Value &result) override;
+
+private:
+  int count_ = 0;  // 统计数量
+};
+

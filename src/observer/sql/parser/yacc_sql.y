@@ -166,6 +166,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <key_list>            attr_list
 %type <relation_list>       rel_list
 %type <expression>          expression
+%type <expression>          aggr_func_expr
 %type <expression_list>     expression_list
 %type <expression_list>     group_by
 %type <sql_node>            calc_stmt
@@ -578,8 +579,27 @@ expression:
     | '*' {
       $$ = new StarExpr();
     }
-    // your code here
+    | aggr_func_expr {
+      $$ = $1; 
+    }
     ;
+
+aggr_func_expr:
+    ID LBRACE expression RBRACE {
+        $$ = create_aggregate_expression($1, $3, sql_string, &@$);
+        if ($$ == nullptr) {
+            yyerror(&@$, sql_string, sql_result, scanner, "Invalid aggregate expression");
+            YYERROR;
+        }
+        // 不要 free($1)，已在内部复制或构造 std::string
+    }
+    | ID LBRACE '*' RBRACE {
+
+      auto star_expr = new StarExpr();
+      $$ = create_aggregate_expression($1, star_expr, sql_string, &@$);
+      // 不要 free($1)
+  }
+  ;
 
 rel_attr:
     ID {
