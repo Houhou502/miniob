@@ -46,18 +46,14 @@ RC ScalarGroupByPhysicalOperator::open(Trx *trx)
       return RC::INTERNAL;
     }
 
-    // 计算需要做聚合的值
-    group_value_expression_tuple.set_tuple(child_tuple);
-
-    // 计算聚合值
+    // 只在第一次迭代初始化 group_value_
     if (group_value_ == nullptr) {
       AggregatorList aggregator_list;
       create_aggregator_list(aggregator_list);
 
       ValueListTuple child_tuple_to_value;
-      rc = ValueListTuple::make(*child_tuple, child_tuple_to_value);
+      rc = ValueListTuple::make(*child_tuple, child_tuple_to_value); // 修复：初始化 ValueListTuple
       if (OB_FAIL(rc)) {
-        LOG_WARN("failed to make tuple to value list. rc=%s", strrc(rc));
         return rc;
       }
 
@@ -65,7 +61,26 @@ RC ScalarGroupByPhysicalOperator::open(Trx *trx)
       composite_tuple.add_tuple(make_unique<ValueListTuple>(std::move(child_tuple_to_value)));
       group_value_ = make_unique<GroupValueType>(std::move(aggregator_list), std::move(composite_tuple));
     }
+
+    // // 计算聚合值
+    // if (group_value_ == nullptr) {
+    //   AggregatorList aggregator_list;
+    //   create_aggregator_list(aggregator_list);
+
+    //   ValueListTuple child_tuple_to_value;
+    //   rc = ValueListTuple::make(*child_tuple, child_tuple_to_value);
+    //   if (OB_FAIL(rc)) {
+    //     LOG_WARN("failed to make tuple to value list. rc=%s", strrc(rc));
+    //     return rc;
+    //   }
+
+    //   CompositeTuple composite_tuple;
+    //   composite_tuple.add_tuple(make_unique<ValueListTuple>(std::move(child_tuple_to_value)));
+    //   group_value_ = make_unique<GroupValueType>(std::move(aggregator_list), std::move(composite_tuple));
+    // }
     
+    // 执行聚合
+    group_value_expression_tuple.set_tuple(child_tuple);
     rc = aggregate(get<0>(*group_value_), group_value_expression_tuple);
     if (OB_FAIL(rc)) {
       LOG_WARN("failed to aggregate values. rc=%s", strrc(rc));
@@ -75,6 +90,13 @@ RC ScalarGroupByPhysicalOperator::open(Trx *trx)
 
   if (RC::RECORD_EOF == rc) {
     rc = RC::SUCCESS;
+    // 处理空表：初始化 group_value_ 但无数据
+    if (group_value_ == nullptr) {
+      AggregatorList aggregator_list;
+      create_aggregator_list(aggregator_list);
+      CompositeTuple composite_tuple;
+      group_value_ = make_unique<GroupValueType>(std::move(aggregator_list), std::move(composite_tuple));
+    }
   }
 
   if (OB_FAIL(rc)) {
@@ -91,14 +113,12 @@ RC ScalarGroupByPhysicalOperator::open(Trx *trx)
   return rc;
 }
 
-RC ScalarGroupByPhysicalOperator::next()
+RC ScalarGroupByPhysicalOperator::next() 
 {
-  if (group_value_ == nullptr || emitted_) {
+  if (emitted_) {
     return RC::RECORD_EOF;
   }
-
   emitted_ = true;
-
   return RC::SUCCESS;
 }
 
@@ -110,11 +130,7 @@ RC ScalarGroupByPhysicalOperator::close()
   return RC::SUCCESS;
 }
 
-Tuple *ScalarGroupByPhysicalOperator::current_tuple()
+Tuple *ScalarGroupByPhysicalOperator::current_tuple() 
 {
-  if (group_value_ == nullptr) {
-    return nullptr;
-  }
-
-  return &get<1>(*group_value_);
+  return group_value_ ? &get<1>(*group_value_) : nullptr;
 }

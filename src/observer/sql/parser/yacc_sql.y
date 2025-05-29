@@ -593,40 +593,26 @@ expression:
 
 aggr_func_expr:
     ID LBRACE expression_list RBRACE {
-        // 处理常规聚合函数参数
         if ($3->size() != 1) {
-            // 参数数量不为1时，自动转为 MAX(*) 处理
-            auto star_expr = new StarExpr();
-            $$ = create_aggregate_expression("MAX", star_expr, sql_string, &@$);
-            if ($$ == nullptr) {
-                delete star_expr;
-                yyerror(&@$, sql_string, sql_result, scanner,
-                       "FAILURE: Invalid aggregate function");
-                delete $3;
-                YYERROR;
-            }
+            // 参数数目不是 1 ⇒ 创建非法表达式（children = nullptr）
+            $$ = new UnboundAggregateExpr($1, nullptr);
+            $$->set_name(token_name(sql_string, &@$));
         } else {
             Expression* child = $3->at(0).release();
             $$ = create_aggregate_expression($1, child, sql_string, &@$);
             if ($$ == nullptr) {
                 delete child;
                 yyerror(&@$, sql_string, sql_result, scanner,
-                       "FAILURE: Invalid aggregate function or argument type");
+                        "FAILURE: Invalid aggregate function or argument type");
                 YYERROR;
             }
         }
-        delete $3; // 释放expression_list内存
+        delete $3;
     }
     | ID LBRACE RBRACE {
-        // 无参数情况自动转为 MAX(*)
-        auto star_expr = new StarExpr();
-        $$ = create_aggregate_expression("MAX", star_expr, sql_string, &@$);
-        if ($$ == nullptr) {
-            delete star_expr;
-            yyerror(&@$, sql_string, sql_result, scanner,
-                   "FAILURE: Failed to create aggregate expression");
-            YYERROR;
-        }
+        // 无参数 ⇒ 非法（也不隐性构建 star）
+        $$ = new UnboundAggregateExpr($1, nullptr);
+        $$->set_name(token_name(sql_string, &@$));
     }
     ;
 

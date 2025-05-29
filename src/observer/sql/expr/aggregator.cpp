@@ -100,9 +100,11 @@ RC MinAggregator::evaluate(Value &result)
 
 RC CountAggregator::accumulate(const Value &value)
 {
-  if (!value.is_null()) {
-    count_++;
+  LOG_DEBUG("count is %ld", count_);
+  if (value.is_null()) {
+    return RC::SUCCESS;
   }
+  count_++;
   return RC::SUCCESS;
 }
 
