@@ -30,11 +30,6 @@ SelectStmt::~SelectStmt()
     delete filter_stmt_;
     filter_stmt_ = nullptr;
   }
-
-  if (nullptr != orderby_stmt_) {
-    delete orderby_stmt_;
-    orderby_stmt_ = nullptr;
-  }
 }
 
 RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
@@ -145,45 +140,29 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     return rc;
   }
 
-  // 5. 创建ORDER BY语句
-  OrderByStmt *orderby_stmt = nullptr;
+  // create order by statement
+  vector<unique_ptr<OrderByStmt>> orderby_stmts;
   if (!select_sql.orderbys.empty()) {
-    // 先提取所有表达式
-    vector<unique_ptr<Expression>> order_by_exprs;
-    for (auto &order_node : select_sql.orderbys) {
-      vector<unique_ptr<Expression>> temp_exprs;
-      std::unique_ptr<Expression> expr_ptr(order_node.expr);
-      RC rc = expression_binder.bind_expression(expr_ptr, temp_exprs);
+    for (auto &orderby_sql : select_sql.orderbys) {
+      // 将 OrderBySqlNode 转换为 OrderByStmt 需要的格式
+      vector<OrderBySqlNode> orderby_nodes;
+      orderby_nodes.emplace_back(OrderBySqlNode{
+          .expr = std::move(orderby_sql.expr),
+          .is_asc = orderby_sql.is_asc
+      });
+
+      OrderByStmt *orderby_stmt = nullptr;
+      rc = OrderByStmt::create(db, default_table, &table_map, orderby_nodes, orderby_stmt);
       if (rc != RC::SUCCESS) {
-        LOG_WARN("bind order by expression failed");
+        LOG_WARN("failed to create order by stmt");
         if (filter_stmt != nullptr) {
           delete filter_stmt;
         }
         return rc;
       }
-      if (temp_exprs.size() != 1) {
-        LOG_WARN("order by expression should return exactly 1 expression");
-        if (filter_stmt != nullptr) {
-          delete filter_stmt;
-        }
-        return RC::INVALID_ARGUMENT;
-      }
-      order_by_exprs.emplace_back(std::move(temp_exprs[0]));
-    }
-
-    // 创建OrderByStmt
-    rc = OrderByStmt::create(db, default_table, &table_map, 
-                            select_sql.orderbys, orderby_stmt,
-                            std::move(order_by_exprs));
-    if (rc != RC::SUCCESS) {
-      LOG_WARN("failed to create order by stmt");
-      if (filter_stmt != nullptr) {
-        delete filter_stmt;
-      }
-      return rc;
+      orderby_stmts.emplace_back(orderby_stmt);
     }
   }
-
 
   // everything alright
   SelectStmt *select_stmt = new SelectStmt();
@@ -191,7 +170,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   select_stmt->tables_.swap(tables);
   select_stmt->query_expressions_.swap(bound_expressions);
   select_stmt->filter_stmt_ = filter_stmt;
-  select_stmt->orderby_stmt_ = orderby_stmt;
+  select_stmt->orderby_stmt_.swap(orderby_stmts);
   select_stmt->group_by_.swap(group_by_expressions);
 
   stmt                      = select_stmt;

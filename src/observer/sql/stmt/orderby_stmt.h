@@ -11,53 +11,39 @@ class Db;
 class Table;
 class FieldMeta;
 
-class OrderByUnit 
-{
+class OrderByUnit {
 public:
-  OrderByUnit(Expression *expr , bool is_asc):expr_(expr),is_asc_(is_asc)
-  {}
+  OrderByUnit(std::unique_ptr<Expression> expr, bool is_asc = true) 
+    : expr_(std::move(expr)), is_asc_(is_asc) {}
 
   ~OrderByUnit() = default;
 
-  void set_sort_type(bool sort_type){ is_asc_ = sort_type; }
-
+  void set_sort_type(bool sort_type) { is_asc_ = sort_type; }
   bool sort_type() const { return is_asc_; }
-
-  unique_ptr<Expression>& expr(){ return expr_; }
+  const std::unique_ptr<Expression>& expr() const { return expr_; }
 
 private:
-  
-  unique_ptr<Expression> expr_;
-  //true is asc
+  std::unique_ptr<Expression> expr_;
   bool is_asc_ = true;
 };
 
-class OrderByStmt : Stmt
-{
+class OrderByStmt : public Stmt {
 public:
   OrderByStmt() = default;
-  virtual ~OrderByStmt() = default;
+  ~OrderByStmt() = default;
 
-  StmtType type() const override{ return StmtType::ORDERBY; }
+  StmtType type() const override { return StmtType::ORDERBY; }
 
-public:
+  vector<unique_ptr<OrderByUnit>>& get_orderby_units() { 
+    return orderby_units_; 
+  }
 
-  vector<unique_ptr<OrderByUnit>>& get_orderby_units(){ return orderby_units_; }
-  vector<unique_ptr<Expression>>& get_exprs(){ return exprs_; }
-
-  void set_orderby_units(vector<unique_ptr<OrderByUnit >> &&orderby_units){ orderby_units_ = std::move(orderby_units); }
-  void set_exprs(vector<unique_ptr<Expression>> &&exprs){ exprs_ = std::move(exprs); }
-
+  static RC create(Db* db, Table* default_table, 
+      std::unordered_map<string, Table*>* tables,
+      const vector<OrderBySqlNode>& orderby_sql_nodes, 
+      OrderByStmt*& stmt);
   
 
-public:
-  static RC create(Db *db, Table *default_table, std::unordered_map<string, Table *> *tables,
-      const vector<OrderBySqlNode> &orderby_sql_nodes, OrderByStmt *&stmt,
-      vector<unique_ptr<Expression>> &&exprs);
-
 private:
-  vector<unique_ptr<OrderByUnit >> orderby_units_; //排序列
-
-  ///在 create order by stmt 之前提取 select clause 后的 field_expr (非a gg_expr 中的)和 agg_expr
-  vector<unique_ptr<Expression>> exprs_;
+  vector<unique_ptr<OrderByUnit>> orderby_units_; // 唯一管理表达式的容器
 };

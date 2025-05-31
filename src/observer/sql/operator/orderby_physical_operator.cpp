@@ -6,9 +6,8 @@
 #include <chrono>
 #include <algorithm>
 
-
 OrderByPhysicalOperator::OrderByPhysicalOperator(vector<unique_ptr<OrderByUnit>>&& orderby_units,
-  vector<unique_ptr<Expression>> &&exprs)
+    vector<unique_ptr<Expression>> &&exprs)
     : orderby_units_(std::move(orderby_units))
 {
     tuple_.init(std::move(exprs));
@@ -16,134 +15,116 @@ OrderByPhysicalOperator::OrderByPhysicalOperator(vector<unique_ptr<OrderByUnit>>
 
 RC OrderByPhysicalOperator::open(Trx *trx)
 {
-  RC rc = RC::SUCCESS;
-  if (children_.size() != 1) {
-    LOG_WARN("OrderByPhysicalOperator must has one child");
-    return RC::INTERNAL;
-  }
-  if (RC::SUCCESS != (rc = children_[0]->open(trx))) {
-    rc = RC::INTERNAL;
-    LOG_WARN("GroupByOperater child open failed!");
-  }
-  rc = fetch_and_sort_tables();
-  return rc;
+    if (children_.size() != 1) {
+        LOG_WARN("OrderByPhysicalOperator must have exactly one child");
+        return RC::INTERNAL;
+    }
+
+    RC rc = children_[0]->open(trx);
+    if (rc != RC::SUCCESS) {
+        LOG_WARN("Failed to open child operator: %s", strrc(rc));
+        return rc;
+    }
+
+    return fetch_and_sort_tables();
 }
 
 RC OrderByPhysicalOperator::fetch_and_sort_tables()
 {
-  LOG_WARN("niuxn:begin sort");
-  RC rc = RC::SUCCESS;
+    RC rc = RC::SUCCESS;
+    vector<pair<vector<Value>, size_t>> sort_table; // <sort_keys, original_index>
+    values_.clear();
+    ordered_idx_.clear();
 
-  int index = 0;
-  typedef pair<vector<Value>, int> CmpPair;
-  vector<CmpPair> pair_sort_table;//要排序的内容
-  vector<Value> pair_cell;//参与排序的列
+    // 1. 收集所有数据
+    size_t row_count = 0;
+    while ((rc = children_[0]->next()) == RC::SUCCESS) {
+        // 获取排序键值
+        vector<Value> sort_keys;
+        for (auto &unit : orderby_units_) {
+            Value val;
+            rc = unit->expr()->get_value(*children_[0]->current_tuple(), val);
+            if (rc != RC::SUCCESS) {
+                LOG_WARN("Failed to get sort key value: %s", strrc(rc));
+                return rc;
+            }
+            sort_keys.push_back(val);
+        }
 
-  vector<Value> row_values(tuple_.exprs().size());//缓存每一行
-  int row_values_index = 0;
-  //int i = 0;
-  while (RC::SUCCESS == (rc = children_[0]->next())) {
-    // if(i++ % 2500 == 0)
-    // {
-    //   LOG_WARN("niuxn:is sorting, %d",i);
-    // }
-    row_values_index = 0;//每一行都从 0 开始填
-    // construct pair sort table
-    // 1 cons vector<cell>
-    pair_cell.clear();
-    for (auto &unit : orderby_units_) {
-      auto &expr = unit->expr();
-      Value cell;
-      expr->get_value(*children_[0]->current_tuple(), cell);//取出每行中要参与排序的cell
-      pair_cell.emplace_back(cell);
+        // 存储整行数据
+        vector<Value> row_values;
+        for (auto &expr : tuple_.exprs()) {
+            Value val;
+            rc = expr->get_value(*children_[0]->current_tuple(), val);
+            if (rc != RC::SUCCESS) {
+                LOG_WARN("Failed to get row value: %s", strrc(rc));
+                return rc;
+            }
+            row_values.push_back(val);
+        }
+        
+        sort_table.emplace_back(std::move(sort_keys), row_count++);
+        values_.emplace_back(std::move(row_values));
     }
-    // 2 cons pair
-    // 3 cons pair vector
-    pair_sort_table.emplace_back(std::make_pair(pair_cell, index++));//将每行数据放入排序的内存中
-    // store child records
 
-    //存储select 后的 fieldexpr 的值 和aggexpr 的值
-    Value expr_cell;
-    for(auto &expr : tuple_.exprs()){
-      if(expr->get_value(*children_[0]->current_tuple(),expr_cell) != RC::SUCCESS)
-      {
-        LOG_WARN("error in sort");
-        return RC::INTERNAL;
-      }
-      row_values[row_values_index++] = expr_cell;
+    if (rc != RC::RECORD_EOF) {
+        LOG_WARN("Failed to fetch all records: %s", strrc(rc));
+        return rc;
     }
-    values_.emplace_back(row_values);//values 中缓存每一行
-  }
-  if (RC::RECORD_EOF != rc) {
-    LOG_ERROR("Fetch Table Error In SortOperator. RC: %d", rc);
-    return rc;
-  }
-  rc = RC::SUCCESS;
-  LOG_INFO("Fetch Table Success In SortOperator");
 
-  bool order[orderby_units_.size()];  // specify 1 asc or 2 desc
+    // 2. 排序数据
+    auto cmp = [this](const auto &a, const auto &b) {
+        for (size_t i = 0; i < orderby_units_.size(); ++i) {
+            bool is_asc = orderby_units_[i]->sort_type();
+            const Value &va = a.first[i];
+            const Value &vb = b.first[i];
 
+            // 处理NULL值
+            if (va.is_null() && vb.is_null()) continue;
+            if (va.is_null()) return is_asc;
+            if (vb.is_null()) return !is_asc;
 
-  for(size_t i = 0 ; i < orderby_units_.size() ; ++i){
-    order[i] = orderby_units_[i]->sort_type(); // true is asc
-  }
-  // consider null
-  auto cmp = [&order](const CmpPair &a, const CmpPair &b) {
-    auto &cells_a = a.first;
-    auto &cells_b = b.first;
-    assert(cells_a.size() == cells_b.size());
-    for (size_t i = 0; i < cells_a.size(); ++i) {
-      auto &cell_a = cells_a[i];
-      auto &cell_b = cells_b[i];
-      if (cell_a.is_null() && cell_b.is_null()) {
-        continue;
-      }
-      if (cell_a.is_null()) {
-        return order[i] ? true : false;
-      }
-      if (cell_b.is_null()) {
-        return order[i] ? false : true;
-      }
-      if (cell_a != cell_b) {
-        return order[i] ? cell_a < cell_b : cell_a > cell_b;
-      }
+            // 比较非NULL值
+            int cmp_result = va.compare(vb);
+            if (cmp_result != 0) {
+                return is_asc ? (cmp_result < 0) : (cmp_result > 0);
+            }
+        }
+        return false;
+    };
+
+    sort(sort_table.begin(), sort_table.end(), cmp);
+
+    // 3. 保存排序结果
+    for (auto &entry : sort_table) {
+        ordered_idx_.push_back(entry.second);
     }
-    return false;  // completely same
-  };
-  sort(pair_sort_table.begin(), pair_sort_table.end(), cmp);
-  LOG_INFO("niuxn:Sort Table Success In SortOperator");
+    it_ = ordered_idx_.begin();
 
-  // fill ordered_idx_
-  for (size_t i = 0; i < pair_sort_table.size(); ++i) {
-    ordered_idx_.emplace_back(pair_sort_table[i].second);//将原来的每行的标记写入order_index数组中
-  }
-  it_ = ordered_idx_.begin();
-
-  return rc;
+    return RC::SUCCESS;
 }
-
 
 RC OrderByPhysicalOperator::next()
 {
+    if (it_ == ordered_idx_.end() || static_cast<size_t>(*it_) >= values_.size()) {
+        return RC::RECORD_EOF;
+    }
 
-  if (ordered_idx_.end() != it_) {
-    // NOTE: PAY ATTENTION HERE
-
-    tuple_.set_cells(&values_[*it_]);
-    it_++;
-    //children_[0]->current_tuple()->set_record(st_[*it_]);
+    const vector<Value>& row_values = values_[*it_];
+    tuple_.set_cells(&row_values);
+    ++it_;
     return RC::SUCCESS;
-  }
-
-  return RC::RECORD_EOF;
 }
 
 RC OrderByPhysicalOperator::close()
 {
-  return children_[0]->close();
+    if (!children_.empty() && children_[0] != nullptr) {
+        return children_[0]->close();
+    }
+    return RC::SUCCESS;
 }
 
 Tuple *OrderByPhysicalOperator::current_tuple()
 {
-  return &tuple_;
+    return &tuple_;
 }

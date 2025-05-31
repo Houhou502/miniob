@@ -324,33 +324,35 @@ RC PhysicalPlanGenerator::create_plan(UpdateLogicalOperator &update_oper, unique
 }
 
 
-RC PhysicalPlanGenerator::create_plan(OrderByLogicalOperator &orderby_oper, unique_ptr<PhysicalOperator> &oper, Session *session)
+RC PhysicalPlanGenerator::create_plan(
+    OrderByLogicalOperator &logical_oper,
+    unique_ptr<PhysicalOperator> &physical_oper,
+    Session *session)
 {
-  vector<unique_ptr<LogicalOperator>> &child_opers = orderby_oper.children();
+  // 必须确保有子算子
+  if (logical_oper.children().empty()) {
+    LOG_ERROR("OrderBy operator has no child operator");
+    return RC::INTERNAL;
+  }
+
+  // 创建子物理算子
   unique_ptr<PhysicalOperator> child_phy_oper;
-
-  RC rc = RC::SUCCESS;
-  if (!child_opers.empty()) {
-    LogicalOperator *child_oper = child_opers.front().get();
-    rc = create(*child_oper, child_phy_oper, session);
-    if (rc != RC::SUCCESS) {
-      LOG_WARN("failed to create orderby logical operator's child physical operator. rc=%s", strrc(rc));
-      return rc;
-    }
+  RC rc = create(*logical_oper.children().front(), child_phy_oper, session);
+  if (rc != RC::SUCCESS) {
+    return rc;
   }
 
-  OrderByPhysicalOperator *orderby_operator = new OrderByPhysicalOperator(
-      std::move(orderby_oper.orderby_units()),
-      std::move(orderby_oper.exprs()));
-  if (child_phy_oper) {
-    orderby_operator->add_child(std::move(child_phy_oper));
-  }
+  // 创建排序物理算子
+  physical_oper = make_unique<OrderByPhysicalOperator>(
+      std::move(logical_oper.orderby_units()),
+      std::move(logical_oper.exprs()));
 
-  oper = unique_ptr<PhysicalOperator>(orderby_operator);
-
-  LOG_TRACE("create a orderby physical operator");
-  return rc;
+  // 连接子算子
+  physical_oper->add_child(std::move(child_phy_oper));
+  
+  return RC::SUCCESS;
 }
+
 
 RC PhysicalPlanGenerator::create_plan(ExplainLogicalOperator &explain_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {

@@ -580,19 +580,22 @@ order_by_expr:
     expression
     {
       $$ = new OrderBySqlNode();
-      $$->expr = $1;
+      $$->expr = new std::vector<std::unique_ptr<Expression>>();
+      $$->expr->emplace_back($1);  // 正确使用指针访问
       $$->is_asc = true; // 默认升序
     }
     | expression ASC
     {
       $$ = new OrderBySqlNode();
-      $$->expr = $1;
+      $$->expr = new std::vector<std::unique_ptr<Expression>>();
+      $$->expr->emplace_back($1);  // 正确使用指针访问
       $$->is_asc = true;
     }
     | expression DESC
     {
       $$ = new OrderBySqlNode();
-      $$->expr = $1;
+      $$->expr = new std::vector<std::unique_ptr<Expression>>();
+      $$->expr->emplace_back($1);  // 正确使用指针访问
       $$->is_asc = false;
     }
     ;

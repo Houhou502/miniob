@@ -60,7 +60,7 @@ enum CompOp
 
 struct OrderBySqlNode
 {
-  Expression * expr = nullptr;
+  vector<unique_ptr<Expression>> * expr = nullptr;
   bool is_asc;// true 为升序
 };
 
