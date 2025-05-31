@@ -32,6 +32,9 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/update_logical_operator.h"
 #include "sql/operator/update_physical_operator.h"
 
+#include "sql/operator/orderby_logical_operator.h"
+#include "sql/operator/orderby_physical_operator.h"
+
 #include "sql/operator/join_logical_operator.h"
 #include "sql/operator/nested_loop_join_physical_operator.h"
 #include "sql/operator/predicate_logical_operator.h"
@@ -69,6 +72,10 @@ RC PhysicalPlanGenerator::create(LogicalOperator &logical_operator, unique_ptr<P
 
     case LogicalOperatorType::PROJECTION: {
       return create_plan(static_cast<ProjectLogicalOperator &>(logical_operator), oper, session);
+    } break;
+
+    case LogicalOperatorType::ORDERBY: {
+      return create_plan(static_cast<OrderByLogicalOperator &>(logical_operator), oper, session);
     } break;
 
     case LogicalOperatorType::INSERT: {
@@ -314,6 +321,35 @@ RC PhysicalPlanGenerator::create_plan(UpdateLogicalOperator &update_oper, unique
   }
 
   return RC::SUCCESS;
+}
+
+
+RC PhysicalPlanGenerator::create_plan(OrderByLogicalOperator &orderby_oper, unique_ptr<PhysicalOperator> &oper, Session *session)
+{
+  vector<unique_ptr<LogicalOperator>> &child_opers = orderby_oper.children();
+  unique_ptr<PhysicalOperator> child_phy_oper;
+
+  RC rc = RC::SUCCESS;
+  if (!child_opers.empty()) {
+    LogicalOperator *child_oper = child_opers.front().get();
+    rc = create(*child_oper, child_phy_oper, session);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to create orderby logical operator's child physical operator. rc=%s", strrc(rc));
+      return rc;
+    }
+  }
+
+  OrderByPhysicalOperator *orderby_operator = new OrderByPhysicalOperator(
+      std::move(orderby_oper.orderby_units()),
+      std::move(orderby_oper.exprs()));
+  if (child_phy_oper) {
+    orderby_operator->add_child(std::move(child_phy_oper));
+  }
+
+  oper = unique_ptr<PhysicalOperator>(orderby_operator);
+
+  LOG_TRACE("create a orderby physical operator");
+  return rc;
 }
 
 RC PhysicalPlanGenerator::create_plan(ExplainLogicalOperator &explain_oper, unique_ptr<PhysicalOperator> &oper, Session* session)

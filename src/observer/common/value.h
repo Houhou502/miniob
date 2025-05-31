@@ -112,6 +112,44 @@ public:
     return DataType::type_instance(value.attr_type())->cast_to(value, to_type, result);
   }
 
+  bool operator<(const Value &other) {
+    return compare(other) < 0;
+  }
+  bool operator>(const Value &other) {
+    return compare(other) > 0;
+  }
+
+  bool operator==(const Value &other) const
+  {
+    return 0 == compare(other);
+  }
+
+  bool operator!=(const Value &other) const
+  {
+    return 0 != compare(other);
+  }
+
+  bool operator<(const Value &other) const
+  {
+    return compare(other) < 0;
+  }
+
+  bool operator<=(const Value &other) const
+  {
+    return compare(other) <= 0;
+  }
+
+  bool operator>(const Value &other) const
+  {
+    return  compare(other) > 0;
+  }
+
+  bool operator>=(const Value &other) const
+  {
+    return compare(other) >= 0;
+  }
+
+
 
   void set_type(AttrType type) { this->attr_type_ = type; }
   void set_data(char *data, int length);

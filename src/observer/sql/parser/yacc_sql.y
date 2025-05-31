@@ -76,7 +76,11 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         BY
         CREATE
         DROP
+        IS
         GROUP
+        ORDER
+        ASC
+        HAVING
         TABLE
         TABLES
         INDEX
@@ -107,8 +111,14 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         FROM
         WHERE
         AND
+        OR
+        INNER
+        JOIN
         NOT
         LIKE
+        IS_TOKEN
+        IN
+        EXISTS
         NULL_T
         SET
         ON
@@ -144,6 +154,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   vector<RelAttrSqlNode> *                   rel_attr_list;
   vector<string> *                           relation_list;
   vector<string> *                           key_list;
+  OrderBySqlNode*                            orderby;
+  vector<OrderBySqlNode> *                   orderby_list;
   char *                                     cstring;
   int                                        number;
   float                                      floats;
@@ -198,6 +210,11 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <sql_node>            help_stmt
 %type <sql_node>            exit_stmt
 %type <sql_node>            command_wrapper
+%type <orderby>             order_by_expr
+%type <orderby_list>        order_by_list
+%type <orderby_list>        order_by
+
+
 // commands should be a list but I use a single command instead
 %type <sql_node>            commands
 
@@ -503,7 +520,7 @@ update_stmt:      /*  update 语句的语法解析树*/
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list FROM rel_list where group_by
+    SELECT expression_list FROM rel_list where group_by order_by
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
@@ -525,8 +542,61 @@ select_stmt:        /*  select 语句的语法解析树*/
         $$->selection.group_by.swap(*$6);
         delete $6;
       }
+
+      if(($7 != nullptr)){
+        $$->selection.orderbys.swap(*$7);
+        delete $7;
+      }
     }
     ;
+
+order_by:
+    /* 空规则 */
+    {
+      $$ = nullptr;
+    }
+    | ORDER BY order_by_list
+    {
+      $$ = $3;
+    }
+    ;
+
+order_by_list:
+    order_by_expr
+    {
+      $$ = new std::vector<OrderBySqlNode>();
+      $$->push_back(*$1);
+      delete $1;
+    }
+    | order_by_list ',' order_by_expr
+    {
+      $1->push_back(*$3);
+      delete $3;
+      $$ = $1;
+    }
+    ;
+
+order_by_expr:
+    expression
+    {
+      $$ = new OrderBySqlNode();
+      $$->expr = $1;
+      $$->is_asc = true; // 默认升序
+    }
+    | expression ASC
+    {
+      $$ = new OrderBySqlNode();
+      $$->expr = $1;
+      $$->is_asc = true;
+    }
+    | expression DESC
+    {
+      $$ = new OrderBySqlNode();
+      $$->expr = $1;
+      $$->is_asc = false;
+    }
+    ;
+
 calc_stmt:
     CALC expression_list
     {

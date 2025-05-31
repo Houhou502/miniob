@@ -16,6 +16,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/string.h"
 #include "common/log/log.h"
 #include "sql/stmt/filter_stmt.h"
+#include "sql/stmt/orderby_stmt.h"
 #include "storage/db/db.h"
 #include "storage/table/table.h"
 #include "sql/parser/expression_binder.h"
@@ -28,6 +29,11 @@ SelectStmt::~SelectStmt()
   if (nullptr != filter_stmt_) {
     delete filter_stmt_;
     filter_stmt_ = nullptr;
+  }
+
+  if (nullptr != orderby_stmt_) {
+    delete orderby_stmt_;
+    orderby_stmt_ = nullptr;
   }
 }
 
@@ -120,6 +126,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     }
   }
 
+
   Table *default_table = nullptr;
   if (tables.size() == 1) {
     default_table = tables[0];
@@ -138,13 +145,55 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     return rc;
   }
 
+  // 5. 创建ORDER BY语句
+  OrderByStmt *orderby_stmt = nullptr;
+  if (!select_sql.orderbys.empty()) {
+    // 先提取所有表达式
+    vector<unique_ptr<Expression>> order_by_exprs;
+    for (auto &order_node : select_sql.orderbys) {
+      vector<unique_ptr<Expression>> temp_exprs;
+      std::unique_ptr<Expression> expr_ptr(order_node.expr);
+      RC rc = expression_binder.bind_expression(expr_ptr, temp_exprs);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("bind order by expression failed");
+        if (filter_stmt != nullptr) {
+          delete filter_stmt;
+        }
+        return rc;
+      }
+      if (temp_exprs.size() != 1) {
+        LOG_WARN("order by expression should return exactly 1 expression");
+        if (filter_stmt != nullptr) {
+          delete filter_stmt;
+        }
+        return RC::INVALID_ARGUMENT;
+      }
+      order_by_exprs.emplace_back(std::move(temp_exprs[0]));
+    }
+
+    // 创建OrderByStmt
+    rc = OrderByStmt::create(db, default_table, &table_map, 
+                            select_sql.orderbys, orderby_stmt,
+                            std::move(order_by_exprs));
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to create order by stmt");
+      if (filter_stmt != nullptr) {
+        delete filter_stmt;
+      }
+      return rc;
+    }
+  }
+
+
   // everything alright
   SelectStmt *select_stmt = new SelectStmt();
 
   select_stmt->tables_.swap(tables);
   select_stmt->query_expressions_.swap(bound_expressions);
   select_stmt->filter_stmt_ = filter_stmt;
+  select_stmt->orderby_stmt_ = orderby_stmt;
   select_stmt->group_by_.swap(group_by_expressions);
+
   stmt                      = select_stmt;
   return RC::SUCCESS;
 }

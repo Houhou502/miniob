@@ -21,6 +21,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/utility.h"
 
 class Expression;
+class OrderByUnit;
 
 /**
  * @defgroup SQLParser SQL Parser
@@ -56,6 +57,14 @@ enum CompOp
   NO_OP
 };
 
+
+struct OrderBySqlNode
+{
+  Expression * expr = nullptr;
+  bool is_asc;// true 为升序
+};
+
+
 /**
  * @brief 表示一个条件比较
  * @ingroup SQLParser
@@ -89,6 +98,7 @@ struct SelectSqlNode
   vector<string>                 relations;    ///< 查询的表
   vector<ConditionSqlNode>       conditions;   ///< 查询条件，使用AND串联起来多个条件
   vector<unique_ptr<Expression>> group_by;     ///< group by clause
+  vector<OrderBySqlNode>         orderbys;
 };
 
 /**
