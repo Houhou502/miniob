@@ -441,7 +441,6 @@ private:
   Tuple *right_ = nullptr;
 };
 
-
 /**
  * @brief 一些常量值组成的Tuple,用于 orderby 算子中
  * @ingroup Tuple
@@ -459,13 +458,19 @@ public:
 
   virtual int cell_num() const override
   {
-    return static_cast<int>((*cells_).size());
+    return static_cast<int>(exprs_.size());
   }
 
   virtual RC cell_at(int index, Value &cell) const override
   {
     if (index < 0 || index >= cell_num()) {
+      LOG_WARN("invalid index %d, cell_num=%d", index, cell_num());
       return RC::NOTFOUND;
+    }
+
+    if (cells_ == nullptr || index >= static_cast<int>(cells_->size())) {
+      LOG_WARN("cells is null or index out of range");
+      return RC::INTERNAL;
     }
 
     cell = (*cells_)[index];
@@ -474,27 +479,35 @@ public:
 
   RC find_cell(const TupleCellSpec &spec, Value &cell) const override
   {
-    // 先从字段表达式里面找
+    // 遍历所有表达式
     for (size_t i = 0; i < exprs_.size(); ++i) {
-      if(exprs_[i]->type() == ExprType::FIELD){
-        const FieldExpr * expr =static_cast<FieldExpr*>(exprs_[i].get());
-        if (std::string(expr->field_name()) == std::string(spec.field_name()) && 
-            std::string(expr->table_name()) == std::string(spec.table_name()) ) {
-            cell = (*cells_)[i];
-          LOG_INFO("Field is found in field_exprs");
-          return RC::SUCCESS;
-        }
-      }else if(exprs_[i]->type() == ExprType::AGGREGATION){
-        if(spec.alias() == exprs_[i]->name()){
+      const Expression *expr = exprs_[i].get();
+      if (expr == nullptr) {
+        continue;
+      }
+
+      // 检查表达式名称是否匹配
+      if (spec.alias() != nullptr && 0 == strcmp(spec.alias(), expr->name())) {
+        if (cells_ != nullptr && i < cells_->size()) {
           cell = (*cells_)[i];
           return RC::SUCCESS;
         }
-      }else{
-        LOG_WARN("find cell in OrderByTuple error!");
-        return RC::INTERNAL;
+      }
+
+      // 对于字段表达式，检查表名和字段名
+      if (expr->type() == ExprType::FIELD) {
+        const FieldExpr *field_expr = static_cast<const FieldExpr*>(expr);
+        if ((spec.table_name() == nullptr || 
+             0 == strcmp(spec.table_name(), field_expr->table_name())) &&
+            0 == strcmp(spec.field_name(), field_expr->field_name())) {
+          if (cells_ != nullptr && i < cells_->size()) {
+            cell = (*cells_)[i];
+            return RC::SUCCESS;
+          }
+        }
       }
     }
-    LOG_WARN(" not find cell in OrderByTuple ");
+
     return RC::NOTFOUND;
   }
 
@@ -509,13 +522,30 @@ public:
     return exprs_;
   }
 
+  virtual RC spec_at(int index, TupleCellSpec &spec) const override
+  {
+    if (index < 0 || index >= cell_num()) {
+      LOG_WARN("invalid index %d, cell_num=%d", index, cell_num());
+      return RC::NOTFOUND;
+    }
 
-virtual RC spec_at(int index, TupleCellSpec &spec) const override {
+    const Expression *expr = exprs_[index].get();
+    if (expr == nullptr) {
+      LOG_WARN("expression at index %d is null", index);
+      return RC::INTERNAL;
+    }
+
+    if (expr->type() == ExprType::FIELD) {
+      const FieldExpr *field_expr = static_cast<const FieldExpr*>(expr);
+      spec = TupleCellSpec(field_expr->table_name(), field_expr->field_name());
+    } else {
+      spec = TupleCellSpec(expr->name());
+    }
     return RC::SUCCESS;
-}
+  }
 
 private:
   const std::vector<Value> *cells_ = nullptr;
-  //在 create order by stmt 之前提取的  select clause 后的 field_expr (非a gg_expr 中的)和 agg_expr
   std::vector<std::unique_ptr<Expression>> exprs_;
 };
+

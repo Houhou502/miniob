@@ -39,25 +39,45 @@ RC OrderByPhysicalOperator::fetch_and_sort_tables()
     // 1. 收集所有数据
     size_t row_count = 0;
     while ((rc = children_[0]->next()) == RC::SUCCESS) {
+        Tuple* current_tuple = children_[0]->current_tuple();
+        if (current_tuple == nullptr) {
+            LOG_WARN("Current tuple is null");
+            return RC::INTERNAL;
+        }
+
         // 获取排序键值
         vector<Value> sort_keys;
-        for (auto &unit : orderby_units_) {
+        bool has_error = false;
+        
+        for (size_t i = 0; i < orderby_units_.size(); i++) {
+            auto &unit = orderby_units_[i];
+            if (unit->expr() == nullptr) {
+                LOG_WARN("Sort expression at index %d is null", i);
+                return RC::INTERNAL;
+            }
+
             Value val;
-            rc = unit->expr()->get_value(*children_[0]->current_tuple(), val);
+            rc = unit->expr()->get_value(*current_tuple, val);
             if (rc != RC::SUCCESS) {
-                LOG_WARN("Failed to get sort key value: %s", strrc(rc));
-                return rc;
+                LOG_WARN("Failed to get sort key value at index %d: %s", i, strrc(rc));
+                has_error = true;
+                break;
             }
             sort_keys.push_back(val);
         }
 
-        // 存储整行数据
+        if (has_error) {
+            continue; // Skip this row if we couldn't get the sort key
+        }
+
+        // 存储所有列的数据
         vector<Value> row_values;
-        for (auto &expr : tuple_.exprs()) {
+        int cell_num = current_tuple->cell_num();
+        for (int i = 0; i < cell_num; i++) {
             Value val;
-            rc = expr->get_value(*children_[0]->current_tuple(), val);
+            rc = current_tuple->cell_at(i, val);
             if (rc != RC::SUCCESS) {
-                LOG_WARN("Failed to get row value: %s", strrc(rc));
+                LOG_WARN("Failed to get column value at index %d: %s", i, strrc(rc));
                 return rc;
             }
             row_values.push_back(val);
@@ -70,6 +90,11 @@ RC OrderByPhysicalOperator::fetch_and_sort_tables()
     if (rc != RC::RECORD_EOF) {
         LOG_WARN("Failed to fetch all records: %s", strrc(rc));
         return rc;
+    }
+
+    if (sort_table.empty()) {
+        LOG_TRACE("No records to sort");
+        return RC::SUCCESS;
     }
 
     // 2. 排序数据
@@ -96,7 +121,9 @@ RC OrderByPhysicalOperator::fetch_and_sort_tables()
     sort(sort_table.begin(), sort_table.end(), cmp);
 
     // 3. 保存排序结果
-    for (auto &entry : sort_table) {
+    ordered_idx_.clear();
+    ordered_idx_.reserve(sort_table.size());
+    for (const auto &entry : sort_table) {
         ordered_idx_.push_back(entry.second);
     }
     it_ = ordered_idx_.begin();

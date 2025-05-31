@@ -113,7 +113,6 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
 
   const vector<Table *> &tables = select_stmt->tables();
   for (Table *table : tables) {
-
     unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(table, ReadWriteMode::READ_ONLY));
     if (table_oper == nullptr) {
       table_oper = std::move(table_get_oper);
@@ -125,12 +124,10 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
     }
   }
 
-
   if (predicate_oper) {
     if (*last_oper) {
       predicate_oper->add_child(std::move(*last_oper));
     }
-
     last_oper = &predicate_oper;
   }
 
@@ -145,61 +142,45 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
     if (*last_oper) {
       group_by_oper->add_child(std::move(*last_oper));
     }
-
     last_oper = &group_by_oper;
   }
 
-
-  auto project_oper = make_unique<ProjectLogicalOperator>(std::move(select_stmt->query_expressions()));
-  if (*last_oper) {
-    project_oper->add_child(std::move(*last_oper));
-  }
-
-  // // 4. 创建投影算子
-  // auto project_oper = make_unique<ProjectLogicalOperator>();
-  // for (auto &expr : select_stmt->query_expressions()) {
-  //   project_oper->add_expression(expr->copy());
-  // }
-
-  // // 连接前面的算子
-  // unique_ptr<LogicalOperator> current_oper;
-  // if (group_by_oper) {
-  //   current_oper = std::move(group_by_oper);
-  // } else if (predicate_oper) {
-  //   current_oper = std::move(predicate_oper);
-  // } else {
-  //   current_oper = std::move(table_oper);
-  // }
-  
-  //project_oper->add_child(std::move(current_oper));
-
-  // 5. 创建排序算子
-  if (!select_stmt->orderby_stmt().empty()) {
-    vector<unique_ptr<OrderByUnit>> orderby_units;
-    vector<unique_ptr<Expression>> orderby_exprs;
-    
-    for (auto &orderby_stmt : select_stmt->orderby_stmt()) {
-      for (auto &unit : orderby_stmt->get_orderby_units()) {
-        orderby_units.emplace_back(make_unique<OrderByUnit>(
-            unit->expr()->copy(),
-            unit->sort_type()
-        ));
-        orderby_exprs.emplace_back(unit->expr()->copy());
-      }
+  // 创建投影算子
+    auto project_oper = make_unique<ProjectLogicalOperator>(std::move(select_stmt->query_expressions()));
+    if (*last_oper) {
+        project_oper->add_child(std::move(*last_oper));
     }
 
-    auto orderby_oper = make_unique<OrderByLogicalOperator>(
-        std::move(orderby_units),
-        std::move(orderby_exprs)
-    );
-    
-    orderby_oper->add_child(std::move(project_oper));
-    logical_operator = std::move(orderby_oper);
-  } else {
-    logical_operator = std::move(project_oper);
-  }
+    // 处理ORDER BY
+    if (!select_stmt->orderby_stmt().empty()) {
+        vector<unique_ptr<OrderByUnit>> orderby_units;
+        vector<unique_ptr<Expression>> orderby_exprs;
+        
+        for (auto &orderby_stmt : select_stmt->orderby_stmt()) {
+            for (auto &unit : orderby_stmt->get_orderby_units()) {
+                orderby_units.emplace_back(make_unique<OrderByUnit>(
+                    unit->expr()->copy(),
+                    unit->sort_type()
+                ));
+                orderby_exprs.emplace_back(unit->expr()->copy());
+            }
+        }
 
-  return RC::SUCCESS;
+        // 创建排序算子并转换为基类指针
+        unique_ptr<LogicalOperator> orderby_oper = make_unique<OrderByLogicalOperator>(
+            std::move(orderby_units),
+            std::move(orderby_exprs)
+        );
+        
+        // 连接投影算子
+        orderby_oper->add_child(std::move(project_oper));
+        logical_operator = std::move(orderby_oper);
+    } else {
+        // 没有ORDER BY时直接使用投影算子
+        logical_operator = std::move(project_oper);
+    }
+
+    return RC::SUCCESS;
 }
 
 RC LogicalPlanGenerator::create_plan(OrderByStmt *order_by_stmt, unique_ptr<LogicalOperator> &logical_operator)
