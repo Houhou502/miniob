@@ -139,6 +139,18 @@ RC OrderByPhysicalOperator::next()
 
     const vector<Value>& row_values = values_[*it_];
     tuple_.set_cells(&row_values);
+    
+    // 打印当前tuple的内容
+    LOG_DEBUG("Sorted tuple at index %zu:", *it_);
+    for (int i = 0; i < tuple_.cell_num(); i++) {
+        Value val;
+        if (tuple_.cell_at(i, val) == RC::SUCCESS) {
+            LOG_DEBUG("  Column %d: %s", i, val.to_string().c_str());
+        } else {
+            LOG_WARN("Failed to get value at column %d", i);
+        }
+    }
+    
     ++it_;
     return RC::SUCCESS;
 }
