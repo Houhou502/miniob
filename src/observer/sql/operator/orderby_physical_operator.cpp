@@ -36,6 +36,21 @@ RC OrderByPhysicalOperator::fetch_and_sort_tables()
     values_.clear();
     ordered_idx_.clear();
 
+    // 在收集数据前检查表名
+    LOG_DEBUG("Checking table names in order by units:");
+    for (size_t i = 0; i < orderby_units_.size(); i++) {
+        auto &unit = orderby_units_[i];
+        if (unit->expr()->type() == ExprType::FIELD) {
+            FieldExpr *field_expr = static_cast<FieldExpr*>(unit->expr().get());
+            LOG_DEBUG("Order by unit %zu: table=%s, field=%s", 
+                     i, 
+                     field_expr->table_name(), 
+                     field_expr->field_name());
+        }
+        //LOG_DEBUG("Order by unit :  name: ")unit->expr()->name()
+    }
+
+
     // 1. 收集所有数据
     size_t row_count = 0;
     while ((rc = children_[0]->next()) == RC::SUCCESS) {
@@ -151,6 +166,8 @@ RC OrderByPhysicalOperator::next()
         }
     }
     
+
+
     ++it_;
     return RC::SUCCESS;
 }

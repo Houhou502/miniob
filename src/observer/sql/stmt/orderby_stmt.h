@@ -26,24 +26,29 @@ private:
   std::unique_ptr<Expression> expr_;
   bool is_asc_ = true;
 };
-
-class OrderByStmt : public Stmt {
+class OrderByStmt : Stmt{
 public:
   OrderByStmt() = default;
-  ~OrderByStmt() = default;
+  virtual ~OrderByStmt() = default;
 
-  StmtType type() const override { return StmtType::ORDERBY; }
-
-  vector<unique_ptr<OrderByUnit>>& get_orderby_units() { 
-    return orderby_units_; 
+  StmtType type() const override
+  {
+    return StmtType::ORDERBY;
   }
+public:
+  void set_orderby_units(std::vector<std::unique_ptr<OrderByUnit >> &&orderby_units){ orderby_units_ = std::move(orderby_units); }
+  void set_exprs(std::vector<std::unique_ptr<Expression>> &&exprs) { exprs_ = std::move(exprs); }
+  std::vector<std::unique_ptr<OrderByUnit>>& get_orderby_units() { return orderby_units_; }
+  std::vector<std::unique_ptr<Expression>>& get_exprs() {  return exprs_; }
 
-  static RC create(Db* db, Table* default_table, 
-      std::unordered_map<string, Table*>* tables,
-      const vector<OrderBySqlNode>& orderby_sql_nodes, 
-      OrderByStmt*& stmt);
-  
+public:
+  static RC create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
+      std::vector<OrderBySqlNode> &&orderby_sql_nodes, OrderByStmt *&stmt,
+      std::vector<std::unique_ptr<Expression>> &&exprs);
 
 private:
-  vector<unique_ptr<OrderByUnit>> orderby_units_; // 唯一管理表达式的容器
+  std::vector<std::unique_ptr<OrderByUnit >> orderby_units_; 
+
+  ///在 create order by stmt 之前提取 select clause 后的 field_expr (非a gg_expr 中的)和 agg_expr
+  std::vector<std::unique_ptr<Expression>> exprs_;
 };

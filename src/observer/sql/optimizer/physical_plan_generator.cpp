@@ -13,6 +13,7 @@ See the Mulan PSL v2 for more details. */
 //
 
 #include "common/log/log.h"
+#include "common/value.h"
 #include "sql/expr/expression.h"
 #include "session/session.h"
 #include "sql/operator/aggregate_vec_physical_operator.h"
@@ -346,6 +347,27 @@ RC PhysicalPlanGenerator::create_plan(
   physical_oper = make_unique<OrderByPhysicalOperator>(
       std::move(logical_oper.orderby_units()),
       std::move(logical_oper.exprs()));
+
+      std::cout << "\n===== OrderByPhysicalOperator 构造参数 =====" << std::endl;
+     for (const auto& unit : logical_oper.orderby_units()) {
+    if (unit) {
+                std::cout<<"unit: "<<unit->expr()<<" "<<unit->expr()->name()<<" "<<unit->sort_type()<<endl;
+            }
+    else {
+        std::cout << "  - 排序单元为空" << std::endl;
+    }
+  }
+  
+
+
+for (const auto& expr : logical_oper.exprs()) {
+    if (expr) {
+        cout<<"name:"<<expr->name()<<endl;
+    } else {
+        std::cout << "  - 表达式为空" << std::endl;
+    }
+}
+  
 
   // 连接子算子
   physical_oper->add_child(std::move(child_phy_oper));

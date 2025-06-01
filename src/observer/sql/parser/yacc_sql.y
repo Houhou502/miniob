@@ -565,14 +565,14 @@ order_by_list:
     order_by_expr
     {
       $$ = new std::vector<OrderBySqlNode>();
-      $$->push_back(*$1);
+      $$->emplace_back(std::move(*$1));
       delete $1;
     }
-    | order_by_list ',' order_by_expr
+    | order_by_expr COMMA order_by_list
     {
-      $1->push_back(*$3);
-      delete $3;
-      $$ = $1;
+      $$ = $3;
+      $$->emplace_back(std::move(*$1));
+      delete $1;
     }
     ;
 
@@ -580,22 +580,19 @@ order_by_expr:
     expression
     {
       $$ = new OrderBySqlNode();
-      $$->expr = new std::vector<std::unique_ptr<Expression>>();
-      $$->expr->emplace_back($1);  // 正确使用指针访问
-      $$->is_asc = true; // 默认升序
+      $$->expr = std::unique_ptr<Expression>($1);
+      $$->is_asc = true;
     }
     | expression ASC
     {
       $$ = new OrderBySqlNode();
-      $$->expr = new std::vector<std::unique_ptr<Expression>>();
-      $$->expr->emplace_back($1);  // 正确使用指针访问
+      $$->expr = std::unique_ptr<Expression>($1);
       $$->is_asc = true;
     }
     | expression DESC
     {
       $$ = new OrderBySqlNode();
-      $$->expr = new std::vector<std::unique_ptr<Expression>>();
-      $$->expr->emplace_back($1);  // 正确使用指针访问
+      $$->expr = std::unique_ptr<Expression>($1);
       $$->is_asc = false;
     }
     ;

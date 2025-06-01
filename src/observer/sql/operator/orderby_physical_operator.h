@@ -37,6 +37,10 @@ private:
   vector<vector<Value>> values_;
   OrderByTuple tuple_;
 
+  std::unique_ptr<OrderByTuple> header_tuple_;  // 使用OrderByTuple存储表头
+  std::unique_ptr<OrderByTuple> current_tuple_; // 当前处理的tuple
+  bool header_emitted_ = false;
+
   vector<int> ordered_idx_;//存储从 values_中取 数据的顺序
   vector<int>::iterator it_;
 };

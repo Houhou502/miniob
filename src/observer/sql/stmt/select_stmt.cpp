@@ -143,6 +143,19 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   // create order by statement
   vector<unique_ptr<OrderByStmt>> orderby_stmts;
   if (!select_sql.orderbys.empty()) {
+
+    vector<unique_ptr<Expression>> bound_orderby_exprs;
+    for (auto &orderby_sql : select_sql.orderbys) {
+      RC rc = expression_binder.bind_expression(orderby_sql.expr, bound_orderby_exprs);
+      if (OB_FAIL(rc)) {
+        LOG_WARN("bind order by expression failed");
+        if (filter_stmt != nullptr) {
+          delete filter_stmt;
+        }
+        return rc;
+      }
+    }
+    
     for (auto &orderby_sql : select_sql.orderbys) {
       // 将 OrderBySqlNode 转换为 OrderByStmt 需要的格式
       vector<OrderBySqlNode> orderby_nodes;
@@ -152,7 +165,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
       });
 
       OrderByStmt *orderby_stmt = nullptr;
-      rc = OrderByStmt::create(db, default_table, &table_map, orderby_nodes, orderby_stmt);
+      rc = OrderByStmt::create(db, default_table, &table_map, std::move(orderby_nodes), orderby_stmt, std::move(bound_expressions));
       if (rc != RC::SUCCESS) {
         LOG_WARN("failed to create order by stmt");
         if (filter_stmt != nullptr) {

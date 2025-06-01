@@ -260,6 +260,11 @@ public:
   ProjectTuple()          = default;
   virtual ~ProjectTuple() = default;
 
+  vector<unique_ptr<Expression>> move_expressions() {
+        return std::move(expressions_);
+  }
+
+
   void set_expressions(vector<unique_ptr<Expression>> &&expressions) { expressions_ = std::move(expressions); }
 
   auto get_expressions() const -> const vector<unique_ptr<Expression>> & { return expressions_; }
