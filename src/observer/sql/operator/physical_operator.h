@@ -55,6 +55,7 @@ enum class PhysicalOperatorType
   EXPR_VEC,
   UPDATE,
   ORDERBY,
+  GROUPBY,
 };
 
 /**

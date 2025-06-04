@@ -27,5 +27,5 @@ public:
   
 private:
   vector<unique_ptr<OrderByUnit >> orderby_units_; //排序列
-  vector<unique_ptr<Expression>> exprs_;  // 排序依赖的表达式
+  vector<unique_ptr<Expression>> exprs_;  //在 create order by stmt 之前提取 select clause 后的 field_expr 
 };

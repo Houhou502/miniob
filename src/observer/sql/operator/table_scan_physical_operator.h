@@ -69,6 +69,9 @@ public:
 
   void set_predicates(vector<unique_ptr<Expression>> &&exprs);
 
+  void               set_table_alias(const std::string &table_alias) { table_alias_ = table_alias; }
+  const std::string &table_alias() const { return table_alias_; }
+
 private:
   RC filter(RowTuple &tuple, bool &result);
 
@@ -79,5 +82,6 @@ private:
   RecordScanner                 *record_scanner_;
   Record                         current_record_;
   RowTuple                       tuple_;
+  string                         table_alias_;
   vector<unique_ptr<Expression>> predicates_;  // TODO chang predicate to table tuple filter
 };

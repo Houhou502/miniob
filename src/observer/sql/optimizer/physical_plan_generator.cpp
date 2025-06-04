@@ -201,6 +201,7 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
   } else {
     auto table_scan_oper = new TableScanPhysicalOperator(table, table_get_oper.read_write_mode());
     table_scan_oper->set_predicates(std::move(predicates));
+    table_scan_oper->set_table_alias(table_get_oper.table_alias());
     oper = unique_ptr<PhysicalOperator>(table_scan_oper);
     LOG_TRACE("use table scan");
   }
@@ -357,18 +358,6 @@ RC PhysicalPlanGenerator::create_plan(
         std::cout << "  - 排序单元为空" << std::endl;
     }
   }
-  
-
-
-for (const auto& expr : logical_oper.exprs()) {
-    if (expr) {
-        cout<<"name:"<<expr->name()<<endl;
-    } else {
-        std::cout << "  - 表达式为空" << std::endl;
-    }
-}
-  
-
   // 连接子算子
   physical_oper->add_child(std::move(child_phy_oper));
   

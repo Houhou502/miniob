@@ -227,9 +227,18 @@ RC Expression::create_expression(Db *db,
   }
 }
 
+// RC FieldExpr::get_value(const Tuple &tuple, Value &value) const
+// {
+//   return tuple.find_cell(TupleCellSpec(table_name(), field_name()), value);
+// }
+
 RC FieldExpr::get_value(const Tuple &tuple, Value &value) const
 {
-  return tuple.find_cell(TupleCellSpec(table_name(), field_name()), value);
+  // change the table alias
+  auto spec = TupleCellSpec(table_name(), field_name());
+  if (!table_alias().empty())
+    spec.set_table_alias(table_alias());
+  return tuple.find_cell(spec, value);
 }
 
 bool FieldExpr::equal(const Expression &other) const
@@ -389,14 +398,12 @@ bool ComparisonExpr::like_match(const char *str, const char *pattern) const
     if (*pattern == '\0') {
         return *str == '\0';
     }
-
     // 处理下一个字符是 % 的情况
     if (*pattern == '%') {
         // 跳过连续的 %，因为多个连续的 % 等效于一个 %
         while (*(pattern + 1) == '%') {
             pattern++;
         }
-        
         // % 可以匹配零个或多个字符，因此尝试所有可能的匹配长度
         while (*str != '\0') {
             if (like_match(str, pattern + 1)) {
@@ -404,11 +411,9 @@ bool ComparisonExpr::like_match(const char *str, const char *pattern) const
             }
             str++;
         }
-        
         // 尝试 % 匹配零个字符的情况
         return like_match(str, pattern + 1);
     }
-
     // 处理下一个字符是 _ 的情况
     if (*pattern == '_') {
         // _ 必须匹配一个字符，因此字符串不能为空
@@ -418,12 +423,10 @@ bool ComparisonExpr::like_match(const char *str, const char *pattern) const
         // 继续匹配剩余的字符串和模式
         return like_match(str + 1, pattern + 1);
     }
-
     // 处理普通字符：必须与当前字符匹配，并且剩余部分也匹配
     if (*str != '\0' && *str == *pattern) {
         return like_match(str + 1, pattern + 1);
     }
-
     // 其他情况：匹配失败
     return false;
 }
@@ -909,3 +912,450 @@ RC AggregateExpr::type_from_string(const char *type_str, AggregateExpr::Type &ty
   }
   return rc;
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+AttrType SysFunctionExpr::value_type() const
+{
+  switch (sys_func_type_) {
+    case SysFuncType::DATE_FORMAT: return AttrType::DATES;
+    case SysFuncType::LENGTH: return AttrType::CHARS;
+    case SysFuncType::ROUND: return AttrType::FLOATS;
+    default: return AttrType::UNDEFINED;
+  }
+  return AttrType::UNDEFINED;
+}
+
+RC SysFunctionExpr::check_params() const
+{
+  switch (sys_func_type_) {
+    case SysFuncType::LENGTH: {
+      if (params_.size() != 1 && params_[0]->value_type() != this->value_type()) {
+        LOG_WARN("LENGTH function must have one parameter, which is chars type");
+        return RC::INVALID_ARGUMENT;
+      }
+      break;
+    }
+
+    case SysFuncType::DATE_FORMAT: {
+      if (params_.size() != 2 || params_[0]->value_type() != AttrType::DATES || params_[1]->value_type() != AttrType::CHARS) {
+        LOG_WARN("DATE_FORMAT function must have two parameters, the first is date and the second is chars");
+        return RC::INVALID_ARGUMENT;
+      }
+      break;
+    }
+
+    case SysFuncType::ROUND: {
+      if ((params_.size() == 1 || params_.size() != 2) && params_[0]->value_type() != AttrType::FLOATS) {
+        LOG_WARN("ROUND function must have one or two parameters, the first is float and the second is int");
+        return RC::INVALID_ARGUMENT;
+      }
+      if (params_.size() == 2 && params_[1]->value_type() != AttrType::INTS) {
+        LOG_WARN("ROUND function's second parameter must be int");
+        return RC::INVALID_ARGUMENT;
+      }
+      break;
+    }
+
+    default: {
+      LOG_WARN("unsupported sys_function type. %d", sys_func_type_);
+      return RC::UNIMPLEMENTED;
+    }
+  }
+  return RC::SUCCESS;
+}
+
+RC SysFunctionExpr::get_func_length_value(const Tuple &tuple, Value &value) const
+{
+  RC rc = RC::SUCCESS;
+  Value param;
+  rc = params_[0]->get_value(tuple, param);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to get value of first parameter. rc=%s", strrc(rc));
+    return rc;
+  }
+  if (param.attr_type() != AttrType::CHARS) {
+    LOG_WARN("LENGTH function's parameter must be CHAR");
+    return RC::INVALID_ARGUMENT;
+  }
+  int len = strlen(param.get_string().c_str());
+  value.set_int(len);
+  return rc;
+}
+
+RC SysFunctionExpr::get_func_round_value(const Tuple &tuple, Value &value) const
+{
+  RC rc = RC::SUCCESS;
+  if (params_.size() > 1) {
+    Value param1;
+    Value param2;
+    rc = params_[0]->get_value(tuple, param1);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to get value of first parameter. rc=%s", strrc(rc));
+      return rc;
+    }
+    rc = params_[1]->get_value(tuple, param2);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to get value of second parameter. rc=%s", strrc(rc));
+      return rc;
+    }
+    float value1 = param1.get_float();
+    int value2 = param2.get_int();
+    stringstream ss;
+    ss << fixed << setprecision(value2) << value1;
+    ss >> value1;
+    value.set_float(value1);
+  } else {
+    Value param1;
+    rc = params_[0]->get_value(tuple, param1);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to get value of first parameter. rc=%s", strrc(rc));
+      return rc;
+    }
+    float value1 = param1.get_float();
+    stringstream ss;
+    ss << fixed << setprecision(0) << value1;
+    ss >> value1;
+    value.set_float(value1);
+  }
+  return rc;
+}
+
+RC SysFunctionExpr::get_func_date_format_value(const Tuple &tuple, Value &value) const
+{
+    RC rc = RC::SUCCESS;
+
+    // 定义两个参数变量，用于存储从元组中提取的参数值
+    Value param1;
+    Value param2;
+
+    // 提取第一个参数（日期数值，格式为YYYYMMDD的整数）
+    rc = params_[0]->get_value(tuple, param1);
+    if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to get value of first parameter. rc=%s", strrc(rc));
+        return rc;
+    }
+    // 提取第二个参数（日期格式字符串，包含%占位符）
+    rc = params_[1]->get_value(tuple, param2);
+    if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to get value of second parameter. rc=%s", strrc(rc));
+        return rc;
+    }
+
+    // 解析日期数值：假设输入为YYYYMMDD格式的整数
+    int         date_val   = param1.get_int(); // 提取整数形式的日期值
+    const char *format_str = param2.data();     // 提取格式字符串
+
+    // 拆分日期各部分：通过数值运算分解年/月/日
+    int year  = date_val / 10000;        
+    int month = (date_val % 10000) / 100; 
+    int day   = date_val % 100;         
+
+    std::string result; // 存储格式化后的日期字符串
+
+    // 遍历格式字符串，处理每个字符和占位符
+    for (size_t i = 0; format_str[i] != '\0'; ++i) {
+        // 检测占位符起始符'%'
+        if (format_str[i] == '%' && format_str[i + 1] != '\0') {
+            ++i; // 跳过%符号，处理具体格式字符
+            switch (format_str[i]) {
+                case 'y': {
+                    // 两位短年份（如23，取自年份后两位）
+                    result += std::to_string(year % 100 / 10) + std::to_string(year % 10);
+                    break;
+                }
+                case 'Y': {
+                    // 四位完整年份（如2023）
+                    result += std::to_string(year);
+                    break;
+                }
+                case 'm': {
+                    // 两位数字月份（补前导零，如01-12）
+                    if (month < 10) {
+                        result += "0"; // 小于10时补零
+                    }
+                    result += std::to_string(month);
+                    break;
+                }
+                case 'M': {
+                    // 英文月份全称（如January-December）
+                    static const char *month_names[] = {"January", "February", "March", "April",
+                                                        "May", "June", "July", "August",
+                                                        "September", "October", "November", "December"};
+                    // 检查月份有效性（1-12）
+                    if (month >= 1 && month <= 12) {
+                        result += month_names[month - 1]; // 数组下标从0开始
+                    } else {
+                        return RC::INVALID_ARGUMENT; // 无效月份返回错误
+                    }
+                    break;
+                }
+                case 'd': {
+                    // 两位数字日期（补前导零，如01-31）
+                    if (day < 10) {
+                        result += "0"; // 小于10时补零
+                    }
+                    result += std::to_string(day);
+                    break;
+                }
+                case 'D': {
+                    // 带序数词后缀的日期（如1st, 2nd, 11th）
+                    result += std::to_string(day); // 先添加数字部分
+                    // 处理特殊情况：11-13号统一使用th后缀（避免11st、12nd等错误）
+                    if (day >= 11 && day <= 13) {
+                        result += "th";
+                    } else {
+                        // 根据个位数字添加后缀
+                        switch (day % 10) {
+                            case 1: result += "st"; break; // 1st
+                            case 2: result += "nd"; break; // 2nd
+                            case 3: result += "rd"; break; // 3rd
+                            default: result += "th"; break; // 其他情况（如4th, 5th等）
+                        }
+                    }
+                    break;
+                }
+                case '%': {
+                    // 转义%字符，直接输出%
+                    result += "%";
+                    break;
+                }
+                default: {
+                    // 非占位符字符直接添加到结果
+                    result += std::string(1, format_str[i]);
+                    break;
+                }
+            }
+        } else {
+            // 非占位符字符直接添加到结果
+            result += format_str[i];
+        }
+    }
+
+    // 设置返回值类型为字符串类型
+    value.set_type(AttrType::CHARS);
+    // 设置返回值数据（使用C风格字符串和长度，避免字符串末尾'\0'的影响）
+    value.set_data(result.c_str(), result.length());
+    return rc;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// SubqueryExpr::SubqueryExpr(ParsedSqlNode *sub_query_sn) : sub_query_sn_(sub_query_sn) {}
+
+// void SubqueryExpr::set_logical_operator(std::unique_ptr<LogicalOperator> logical_operator)
+// {
+//   logical_operator_ = std::move(logical_operator);
+// }
+// void SubqueryExpr::set_physical_operator(std::unique_ptr<PhysicalOperator> physical_operator)
+// {
+//   physical_operator_ = std::move(physical_operator);
+// }
+
+
+// /**
+//  * 检查子查询表达式的有效性
+//  * 
+//  * 此函数验证子查询是否符合以下规则：
+//  * 1. 子查询的SELECT列表中只能包含一个字段表达式或星号表达式
+//  * 2. 星号表达式和字段表达式不能同时存在
+//  * 3. 如果使用了星号表达式，所有关联表的字段总数必须为1
+//  * 
+//  * @param db 数据库实例指针
+//  * @return RC 返回状态码，表示检查结果
+//  */
+// RC SubqueryExpr::check_sub_query(Db *db)
+// {
+//   // 初始化字段表达式和星号表达式指针
+//   UnboundFieldExpr *field_expr = nullptr;
+//   StarExpr         *star_expr  = nullptr;
+  
+//   // 遍历子查询选择列表中的所有表达式
+//   for (auto &expr : sub_query_sn_->selection.expressions) {
+//     // 确保只存在一个字段表达式
+//     if (field_expr != nullptr) {
+//       LOG_WARN("invalid subquery attributes. It should be only one");
+//       return RC::INVALID_ARGUMENT;
+//     }
+    
+//     // 识别并记录字段表达式或星号表达式
+//     if (expr->type() == ExprType::UNBOUND_FIELD) {
+//       field_expr = static_cast<UnboundFieldExpr *>(expr.get());
+//     } else if (expr->type() == ExprType::STAR) {
+//       star_expr = static_cast<StarExpr *>(expr.get());
+//     }
+//   }
+  
+//   // 验证星号表达式和字段表达式不同时存在
+//   if (field_expr != nullptr && star_expr != nullptr) {
+//     LOG_WARN("star_expr and unbounded_field_expr cannot be used together in subquery");
+//     return RC::INVALID_ARGUMENT;
+//   }
+  
+//   // 如果使用了星号表达式，验证其有效性
+//   if (star_expr != nullptr) {
+//     int fields_num = 0;
+    
+//     // 遍历所有关联表，计算总字段数
+//     for (size_t j = 0; j < sub_query_sn_->selection.relations.size(); ++j) {
+//       const char *table_name = sub_query_sn_->selection.relations[j].relation_name.c_str();
+      
+//       // 验证表名有效性
+//       if (nullptr == table_name) {
+//         LOG_WARN("invalid argument. relation name is null. index=%d", j);
+//         return RC::INVALID_ARGUMENT;
+//       }
+      
+//       // 验证表是否存在
+//       Table *table = db->find_table(table_name);
+//       if (nullptr == table) {
+//         LOG_WARN("no such table. db=%s, table_name=%s", db->name(), table_name);
+//         return RC::SCHEMA_TABLE_NOT_EXIST;
+//       }
+      
+//       // 累加表的字段数量
+//       fields_num += table->table_meta().field_num();
+//     }
+    
+//     // 确保总字段数为1
+//     if (fields_num != 1) {
+//       LOG_WARN("invalid subquery attributes");
+//       return RC::INVALID_ARGUMENT;
+//     }
+//   }
+  
+//   // 所有验证通过
+//   return RC::SUCCESS;
+// }
+
+// /**
+//  * 在事务上下文中执行子查询并获取结果值
+//  * 
+//  * 此函数执行子查询表达式并返回单个值，遵循以下流程：
+//  * 1. 验证查询操作符是否初始化
+//  * 2. 打开物理操作符（如果尚未打开）
+//  * 3. 获取子查询的下一个元组
+//  * 4. 验证元组只包含一个单元格
+//  * 5. 提取结果值并处理资源清理
+//  * 
+//  * @param tuple 输入元组（用于相关子查询）
+//  * @param value 输出值（存储子查询结果）
+//  * @param trx 当前事务指针
+//  * @return RC 返回状态码，表示执行结果
+//  */
+// RC SubqueryExpr::get_value_with_trx(const Tuple &tuple, Value &value, Trx *trx) const
+// {
+//   RC rc = RC::SUCCESS;
+
+//   // 验证查询操作符已初始化
+//   if (logical_operator_ == nullptr && physical_operator_ == nullptr) {
+//     return RC::RECORD_EOF;
+//   }
+
+//   if (physical_operator_ == nullptr) {
+//     LOG_WARN("physical operator is null");
+//     return RC::INVALID_ARGUMENT;
+//   }
+
+//   // 设置当前事务上下文
+//   trx_ = trx;
+
+//   // 转换为非const引用以便传递给可能修改状态的函数
+//   auto *tuple__ = const_cast<Tuple *>(&tuple);
+  
+//   // 首次执行时初始化物理操作符
+//   if (!is_open_) {
+//     rc = open_physical_operator(tuple__);
+//     if (rc != RC::SUCCESS) {
+//       LOG_WARN("failed to open physical operator. rc=%s", strrc(rc));
+//       return rc;
+//     }
+//   }
+
+//   // 执行物理操作获取下一个元组
+//   rc = physical_operator_->next();
+//   if (rc != RC::SUCCESS) {
+//     if (rc != RC::RECORD_EOF) {
+//       // 发生错误时关闭操作符并返回错误码
+//       close_physical_operator();
+//       LOG_PANIC("failed to get next tuple. rc=%s", strrc(rc));
+//       return rc;
+//     }
+    
+//     // 处理查询结束情况
+//     rc = close_physical_operator();
+//     if (rc == RC::SUCCESS) {
+//       rc = RC::RECORD_EOF;
+//     } else {
+//       LOG_PANIC("failed to close physical operator. rc=%s", strrc(rc));
+//     }
+//     return rc;
+//   }
+  
+//   // 获取当前元组
+//   auto tuple_ = physical_operator_->current_tuple();
+  
+//   // 验证子查询结果格式（必须恰好包含一个字段）
+//   if (tuple_->cell_num() > 1) {
+//     LOG_WARN("tuple cell count is not 1");
+//     close_physical_operator();
+//     return RC::INVALID_ARGUMENT;
+//   }
+  
+//   // 处理空结果情况（通常不应该发生，因为上层已验证）
+//   if (tuple_->cell_num() == 0) {
+//     LOG_WARN("A warn from SubqueryExpr: tuple cell count is 0");
+//   }
+  
+//   // 提取结果值（第一个也是唯一的单元格）
+//   tuple_->cell_at(0, value);
+//   return rc;
+// }
+
+// RC SubqueryExpr::get_value(const Tuple &tuple, Value &value) const 
+// { 
+//   return get_value_with_trx(tuple, value, nullptr); 
+// }
+
+
+// RC SubqueryExpr::open_physical_operator(Tuple *outer_tuple) const
+// {
+//   if (physical_operator_ == nullptr) {
+//     LOG_WARN("physical operator is null");
+//     return RC::INVALID_ARGUMENT;
+//   }
+//   // 将外层的 tuple 传递给子查询算子
+//   physical_operator_->set_outer_tuple(outer_tuple);
+//   RC rc = physical_operator_->open(trx_);
+//   if (rc != RC::SUCCESS) {
+//     LOG_WARN("failed to open physical operator. rc=%s", strrc(rc));
+//   } else {
+//     is_open_ = true;
+//   }
+//   return rc;
+// }
+
+// RC SubqueryExpr::close_physical_operator() const
+// {
+//   if (physical_operator_ == nullptr) {
+//     LOG_WARN("physical operator is null");
+//     return RC::INVALID_ARGUMENT;
+//   }
+//   RC rc = physical_operator_->close();
+//   if (rc != RC::SUCCESS) {
+//     LOG_WARN("failed to close physical operator. rc=%s", strrc(rc));
+//   } else {
+//     is_open_ = false;
+//   }
+//   return rc;
+// }
+
+// ////////////////////////////////////////////////////////////////////////////////
+// RC ValueListExpr::get_value(const Tuple &tuple, Value &value) const
+// {
+//   if (index_ >= values_.size()) {
+//     index_ = 0;
+//     return RC::RECORD_EOF;
+//   }
+//   value = values_[index_++];
+//   return RC::SUCCESS;
+// }

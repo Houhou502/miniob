@@ -37,7 +37,13 @@ public:
   StmtType type() const override { return StmtType::SELECT; }
 
 public:
-  static RC create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt);
+    static RC create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt,
+      std::shared_ptr<std::unordered_map<string, string>> name_to_alias            = nullptr,
+      std::shared_ptr<std::unordered_map<string, string>> alias_to_name            = nullptr,
+      std::shared_ptr<std::vector<string>>                loaded_relation_names = nullptr);
+
+  /// 转换表达式中的别名为表名
+  static RC convert_alias_to_name(Expression *expr, std::shared_ptr<std::unordered_map<string, string>> alias_to_name);
 
 public:
   const vector<Table *> &tables() const { return tables_; }
@@ -46,6 +52,7 @@ public:
   vector<unique_ptr<OrderByStmt>> &orderby_stmt()  { return orderby_stmt_; }
   vector<unique_ptr<Expression>> &query_expressions() { return query_expressions_; }
   vector<unique_ptr<Expression>> &group_by() { return group_by_; }
+  vector<string>                 &table_aliases() { return table_aliases_; }
 
 private:
   vector<unique_ptr<Expression>> query_expressions_;
@@ -53,4 +60,5 @@ private:
   FilterStmt                    *filter_stmt_ = nullptr;
   vector<unique_ptr<OrderByStmt>> orderby_stmt_ ;
   vector<unique_ptr<Expression>> group_by_;
+  vector<string>                 table_aliases_;
 };

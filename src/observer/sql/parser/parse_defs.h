@@ -54,6 +54,14 @@ enum CompOp
   GREAT_THAN,   ///< ">"
   LIKE_OP,      ///< "LIKE"
   NOT_LIKE_OP,  ///< "NOT LIKE"
+  IS_NULL,      ///< is null
+  IS_NOT_NULL,  ///< is not null
+
+  IN_OP,        ///< in (sub query)
+  NOT_IN_OP,    ///< not in (sub query)
+  EXISTS_OP,    ///< exists (sub query)
+  NOT_EXISTS_OP,///< not exists (sub query)
+
   NO_OP
 };
 
@@ -64,6 +72,23 @@ struct OrderBySqlNode
   bool is_asc;
 };
 
+enum SysFuncType
+{
+  LENGTH,
+  ROUND,
+  DATE_FORMAT
+};
+
+/**
+ * @brief 描述一个relation
+ * @ingroup SQLParser
+ * @details relation name是表名，alias name是表的别名。
+ */
+struct RelationSqlNode
+{
+  string relation_name;  ///< Relation name
+  string alias_name;     ///< Alias name
+};
 
 /**
  * @brief 表示一个条件比较
@@ -81,6 +106,9 @@ struct ConditionSqlNode
   //char conjunction_type = NO_CONJUNCTION;  ///< conjunction type
 };
 
+
+
+
 /**
  * @brief 描述一个select语句
  * @ingroup SQLParser
@@ -95,10 +123,22 @@ struct ConditionSqlNode
 struct SelectSqlNode
 {
   vector<unique_ptr<Expression>> expressions;  ///< 查询的表达式
-  vector<string>                 relations;    ///< 查询的表
+  vector<RelationSqlNode>        relations;    ///< 查询的表
   vector<ConditionSqlNode>       conditions;   ///< 查询条件，使用AND串联起来多个条件
   vector<unique_ptr<Expression>> group_by;     ///< group by clause
   vector<OrderBySqlNode>         orderbys;
+  vector<ConditionSqlNode>       having_conditions;  ///< groupby having
+};
+
+/**
+ * @brief 描述一个join语句
+ * @ingroup SQLParser
+ * @details join语句的条件是用纯AND或者纯OR连接起来的。
+ */
+struct JoinSqlNode
+{
+  RelationSqlNode relation;  ///< Relation to join with
+  std::vector<ConditionSqlNode> conditions;
 };
 
 /**

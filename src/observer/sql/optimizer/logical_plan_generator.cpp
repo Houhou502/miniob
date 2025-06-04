@@ -105,15 +105,15 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   last_oper = &table_oper;
   unique_ptr<LogicalOperator> predicate_oper;
 
-  RC rc = create_plan(select_stmt->filter_stmt(), predicate_oper);
-  if (OB_FAIL(rc)) {
-    LOG_WARN("failed to create predicate logical plan. rc=%s", strrc(rc));
-    return rc;
-  }
+  const vector<Table *> &tables        = select_stmt->tables();
+  const vector<string>  &table_aliases = select_stmt->table_aliases();
 
-  const vector<Table *> &tables = select_stmt->tables();
+  size_t i = 0;
   for (Table *table : tables) {
-    unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(table, ReadWriteMode::READ_ONLY));
+    auto table_get_oper_ = new TableGetLogicalOperator(table, ReadWriteMode::READ_ONLY);
+    table_get_oper_->set_table_alias(table_aliases[i]);
+    cout<<table_aliases[i]<<endl;
+    unique_ptr<LogicalOperator> table_get_oper(table_get_oper_);
     if (table_oper == nullptr) {
       table_oper = std::move(table_get_oper);
     } else {
@@ -122,7 +122,15 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
       join_oper->add_child(std::move(table_get_oper));
       table_oper = unique_ptr<LogicalOperator>(join_oper);
     }
+    i++;
   }
+
+  RC rc = create_plan(select_stmt->filter_stmt(), predicate_oper);
+  if (OB_FAIL(rc)) {
+    LOG_WARN("failed to create predicate logical plan. rc=%s", strrc(rc));
+    return rc;
+  }
+
 
   if (predicate_oper) {
     if (*last_oper) {
@@ -145,47 +153,47 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
     last_oper = &group_by_oper;
   }
 
-  // 创建投影算子
-    auto project_oper = make_unique<ProjectLogicalOperator>(std::move(select_stmt->query_expressions()));
-    if (*last_oper) {
-        project_oper->add_child(std::move(*last_oper));
-    }
+  // // 创建投影算子
+  //   auto project_oper = make_unique<ProjectLogicalOperator>(std::move(select_stmt->query_expressions()));
+  //   if (*last_oper) {
+  //       project_oper->add_child(std::move(*last_oper));
+  //   }
 
-    // 处理ORDER BY
-    if (!select_stmt->orderby_stmt().empty()) {
-        vector<unique_ptr<OrderByUnit>> orderby_units;
-        vector<unique_ptr<Expression>> orderby_exprs;
+  //   // 处理ORDER BY
+  //   if (!select_stmt->orderby_stmt().empty()) {
+  //       vector<unique_ptr<OrderByUnit>> orderby_units;
+  //       vector<unique_ptr<Expression>> orderby_exprs;
         
-        for (auto &orderby_stmt : select_stmt->orderby_stmt()) {
-          //std::cout<<"logical plan orderby "<<endl;
-            for (auto &unit : orderby_stmt->get_orderby_units()) {
-                orderby_units.emplace_back(make_unique<OrderByUnit>(
-                    unit->expr()->copy(),
-                    unit->sort_type()
-                ));
-                //std::cout<<"unit: "<<unit->expr().get()<<" "<<unit->expr()->name()<<" "<<unit->sort_type()<<endl;
-            }
-        }
+  //       for (auto &orderby_stmt : select_stmt->orderby_stmt()) {
+  //         //std::cout<<"logical plan orderby "<<endl;
+  //           for (auto &unit : orderby_stmt->get_orderby_units()) {
+  //               orderby_units.emplace_back(make_unique<OrderByUnit>(
+  //                   unit->expr()->copy(),
+  //                   unit->sort_type()
+  //               ));
+  //               //std::cout<<"unit: "<<unit->expr().get()<<" "<<unit->expr()->name()<<" "<<unit->sort_type()<<endl;
+  //           }
+  //       }
 
-        for (auto &orderby_stmt : select_stmt->orderby_stmt()) {
-            for (auto &expr_order : orderby_stmt->get_exprs()) {
-              //std::cout<<"logical plan orderby expression "<<endl;
-              orderby_exprs.emplace_back(expr_order->copy());
-              //cout<<"name:"<<expr_order->name()<<endl;
-            }
-          }
+  //       for (auto &orderby_stmt : select_stmt->orderby_stmt()) {
+  //           for (auto &expr_order : orderby_stmt->get_exprs()) {
+  //             //std::cout<<"logical plan orderby expression "<<endl;
+  //             orderby_exprs.emplace_back(expr_order->copy());
+  //             //cout<<"name:"<<expr_order->name()<<endl;
+  //           }
+  //         }
 
-        unique_ptr<LogicalOperator> orderby_oper = make_unique<OrderByLogicalOperator>(
-            std::move(orderby_units),
-            std::move(orderby_exprs)
-        );
+  //       unique_ptr<LogicalOperator> orderby_oper = make_unique<OrderByLogicalOperator>(
+  //           std::move(orderby_units),
+  //           std::move(orderby_exprs)
+  //       );
         
 
-        // orderby_oper->add_child(std::move(project_oper));
-        // logical_operator = std::move(orderby_oper);
-        orderby_oper->add_child(std::move(*last_oper));
-        *last_oper = std::move(orderby_oper); 
-    } 
+  //       // orderby_oper->add_child(std::move(project_oper));
+  //       // logical_operator = std::move(orderby_oper);
+  //       orderby_oper->add_child(std::move(*last_oper));
+  //       *last_oper = std::move(orderby_oper); 
+  //   } 
 
 
   logical_operator = std::move(*last_oper);
